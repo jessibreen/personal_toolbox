@@ -1,5 +1,5 @@
 # image_scraper
-A tool to scrape and organize images.
+A tool to scrape and organize images. Creates a file of images and a table of images in the order they were collected along with their alt text.
 
 ## Usage
 
