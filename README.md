@@ -1,6 +1,6 @@
 # Personal Toolbox
 
-A collection of utilities for teaching and admin tasks.
+A collection of tools for teaching and admin tasks.
 
 ## Tools
 
