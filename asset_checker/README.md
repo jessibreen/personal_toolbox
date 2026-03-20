@@ -1,44 +1,95 @@
-# LibGuides Asset Link Checker
+# asset_checker
 
-A small Python tool for checking URLs in a LibGuides asset export (e.g., `libguide_assets.html`) for dead/broken links.
+> Check URLs in a LibGuides asset HTML export and report dead links.
 
-## What it does
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)]()
 
-1. Parses the LibGuides asset list HTML export and extracts each asset row.
-2. Checks the **URL** column for each asset using HTTP HEAD (with a GET fallback).
-3. Writes two CSV outputs:
-   - `libguide_assets_report.csv` — all checked assets with status and error info.
-   - `libguide_dead_links.csv` — only assets determined to be dead, with a Wayback Machine lookup URL.
+---
 
-## Requirements
+## Table of Contents
 
-- Python 3.8+ (tested with 3.13)
-- `requests` (install via pip)
+- [About](#about)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [License](#license)
 
-## Setup
+---
+
+## About
+
+`check_libguide_assets.py` reads a LibGuides asset export HTML file, checks each URL, and writes CSV reports for all links and dead links.
+
+The dead-link report includes Wayback Machine lookup URLs to help with link recovery.
+
+---
+
+## Features
+
+- Parses asset rows from LibGuides export HTML.
+- Checks URLs using `HEAD` with `GET` fallback for servers that block `HEAD`.
+- Processes links in parallel for faster runs.
+- Writes a full report and a dead-links-only report.
+- Flushes output as it runs so progress is preserved.
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Python 3.8+
+- `pip`
+
+### Steps
 
 ```bash
-cd path/to/repo
+# 1. Move into this project folder
+cd asset_checker
+
+# 2. (Optional) create and activate a virtual environment
 python -m venv .venv
 source .venv/bin/activate
+
+# 3. Install dependencies
 pip install requests
 ```
 
+---
+
 ## Usage
 
-1. Export your LibGuides Asset List as `libguide_assets.html` and place it in the repository root.
-2. Run:
+### Basic Example
 
 ```bash
-.venv/bin/python check_libguide_assets.py
+python check_libguide_assets.py
 ```
 
-### Output
+### Inputs and Outputs
 
-- `libguide_assets_report.csv` — full report of all URLs checked
-- `libguide_dead_links.csv` — dead links only (includes a Wayback Machine URL to aid recovery)
+- Input HTML file: `libguide_assets.html` (same folder as the script)
+- Full output CSV: `libguide_assets_report.csv`
+- Dead-links CSV: `libguide_dead_links.csv` (includes `wayback_url`)
 
-## Notes
+---
 
-- The tool uses parallel requests (20 threads by default). You can adjust `MAX_WORKERS` in `check_libguide_assets.py`.
-- Timeouts are 10 seconds per URL by default; adjust `TIMEOUT` as needed.
+## Configuration
+
+Edit constants at the top of `check_libguide_assets.py` as needed.
+
+| Option | Default | Description |
+|---|---|---|
+| `INPUT_FILE` | `libguide_assets.html` | Input LibGuides asset export HTML |
+| `OUTPUT_FILE` | `libguide_assets_report.csv` | Full results CSV |
+| `DEAD_FILE` | `libguide_dead_links.csv` | Dead-links-only CSV |
+| `MAX_WORKERS` | `20` | Number of parallel URL checks |
+| `TIMEOUT` | `10` | Request timeout in seconds |
+| `RETRY_ON_FAIL` | `1` | Retries for connection errors |
+
+---
+
+## License
+
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
