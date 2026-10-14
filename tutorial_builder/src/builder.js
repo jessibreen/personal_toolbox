@@ -1,0 +1,1208 @@
+'use strict';
+/* Tutorial Builder: turns a narrated screen recording into an editable step-by-step tutorial.
+   Everything runs in the browser. Speech recognition uses Whisper through transformers.js. */
+
+const TF_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js';
+const MODELS = { accurate: 'Xenova/whisper-base.en', fast: 'Xenova/whisper-tiny.en' };
+const HASH = new URLSearchParams(location.hash.slice(1));
+const MODEL_OVERRIDE = HASH.get('model');            // for testing with another model
+const SAMPLE_W = 160;                                // width of the small frames used to spot screen changes
+const PIXEL_CHANGE = 24;                             // grey-level difference that counts as a changed pixel
+const SCREEN_CHANGE = 0.006;                         // share of changed pixels that counts as a new screen
+
+/* ---------------- small helpers ---------------- */
+const $ = (s, r = document) => r.querySelector(s);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  if (attrs) for (const k in attrs) {
+    const v = attrs[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
+}
+const uid = () => Math.random().toString(36).slice(2, 10);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+function fmt(t) { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + String(s).padStart(2, '0'); }
+function fmtVtt(t) {
+  t = Math.max(0, t); const hh = Math.floor(t / 3600), mm = Math.floor(t % 3600 / 60), ss = Math.floor(t % 60), ms = Math.round((t % 1) * 1000);
+  return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0') + '.' + String(Math.min(ms, 999)).padStart(3, '0');
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function mdLite(s) {
+  return esc(s.trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+?)\*/g, '$1<em>$2</em>').replace(/\n/g, '<br>');
+}
+function plain(s) { return s.replace(/\*\*?/g, '').replace(/\s+/g, ' ').trim(); }
+function slug(s) { return (s || 'tutorial').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'tutorial'; }
+function save(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (_) { return null; } }
+
+/* ---------------- browser database: autosave and the speech model ---------------- */
+const db = (() => {
+  let p = null;
+  function open() {
+    if (!p) p = new Promise((res, rej) => {
+      const r = indexedDB.open('tutorial-builder', 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('models'); };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return p;
+  }
+  async function op(storeName, mode, fn) {
+    const d = await open();
+    return new Promise((res, rej) => {
+      const tx = d.transaction(storeName, mode), req = fn(tx.objectStore(storeName));
+      tx.oncomplete = () => res(req && req.result); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    });
+  }
+  return {
+    get: (s, k) => op(s, 'readonly', (st) => st.get(k)).catch(() => undefined),
+    set: (s, k, v) => op(s, 'readwrite', (st) => st.put(v, k)).catch(() => undefined),
+    del: (s, k) => op(s, 'readwrite', (st) => st.delete(k)).catch(() => undefined),
+  };
+})();
+const modelCache = {                                 // transformers.js custom cache, kept in IndexedDB so it also works for a local file
+  async match(key) {
+    const v = await db.get('models', String(key));
+    return v ? new Response(v.body, { headers: v.headers }) : undefined;
+  },
+  async put(key, response) {
+    try {
+      const headers = {}; response.headers.forEach((v, k) => { headers[k] = v; });
+      await db.set('models', String(key), { body: await response.arrayBuffer(), headers });
+    } catch (_) { /* a full disk just means no cache */ }
+  },
+};
+
+/* ---------------- state ---------------- */
+const app = {
+  project: null,          // { id, title, intro, video, sentences, steps, saved }
+  file: null, videoURL: null, captions: null,
+  samples: null,          // { times: number[], grays: Uint8Array[], w, h } small frames for spotting changes
+  picking: null, playingStep: null, undo: [], cancelled: false, tab: 'transcript',
+};
+function newProject(video) {
+  return { id: uid(), title: video ? video.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ') : 'Untitled tutorial', intro: '', video, sentences: [], steps: [], saved: Date.now() };
+}
+
+/* ---------------- views ---------------- */
+function show(view) {
+  for (const id of ['startView', 'procView', 'editView']) $('#' + id).hidden = id !== view;
+  $('#topActions').hidden = view !== 'editView';
+}
+let toastT = 0;
+function toast(msg, action) {
+  $('.toast') && $('.toast').remove();
+  const t = h('div', { class: 'toast', role: 'status' }, h('span', { text: msg }));
+  if (action) t.append(h('button', { type: 'button', text: action.label, onclick: () => { t.remove(); action.run(); } }));
+  document.body.append(t);
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.remove(), action ? 7000 : 3200);
+}
+
+/* ---------------- reading the recording ---------------- */
+function playableBlob(file) {                         // Firefox won't play a blob typed video/quicktime, but plays the same file as mp4
+  return /quicktime/.test(file.type) || /\.mov$/i.test(file.name) ? new Blob([file], { type: 'video/mp4' }) : file;
+}
+function loadVideoEl(url) {
+  return new Promise((res, rej) => {
+    const v = h('video', { muted: true, playsinline: true, preload: 'auto' });
+    v.muted = true;
+    v.onloadedmetadata = () => res(v);
+    v.onerror = () => rej(new Error('This browser can’t open that video file.'));
+    v.src = url;
+  });
+}
+function seek(v, t) {
+  return new Promise((res) => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; v.removeEventListener('seeked', onSeeked); res(); };
+    const onSeeked = () => { if (v.requestVideoFrameCallback) { v.requestVideoFrameCallback(finish); setTimeout(finish, 250); } else finish(); };
+    v.addEventListener('seeked', onSeeked);
+    v.currentTime = clamp(t, 0, Math.max(0, v.duration - 0.05));
+    setTimeout(finish, 4000);
+  });
+}
+
+async function decodeAudio(file) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  let decoded;
+  try { decoded = await ac.decodeAudioData(await file.arrayBuffer()); } finally { try { ac.close(); } catch (_) {} }
+  const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * 16000)), 16000);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+/* fallback for files whose sound can't be decoded directly: listen while the video plays at normal speed */
+async function captureAudioRealtime(url, onProgress) {
+  const v = await loadVideoEl(url);
+  v.muted = false;
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const src = ac.createMediaElementSource(v);
+  const proc = ac.createScriptProcessor(4096, 1, 1);
+  const silent = ac.createGain(); silent.gain.value = 0;
+  const parts = [];
+  proc.onaudioprocess = (e) => parts.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc); proc.connect(silent); silent.connect(ac.destination);
+  await ac.resume();
+  await new Promise((res) => {
+    const tick = setInterval(() => { onProgress(v.currentTime / v.duration); if (app.cancelled) { v.pause(); res(); } }, 300);
+    v.onended = () => { clearInterval(tick); res(); };
+    v.play().catch(res);
+  });
+  const rate = ac.sampleRate; ac.close();
+  const n = parts.reduce((a, p) => a + p.length, 0), all = new Float32Array(n);
+  let o = 0; for (const p of parts) { all.set(p, o); o += p.length; }
+  const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(n / rate * 16000)), 16000);
+  const buf = off.createBuffer(1, n, rate); buf.copyToChannel(all, 0);
+  const s = off.createBufferSource(); s.buffer = buf; s.connect(off.destination); s.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+
+/* where the narration is: 20 ms frames above the room's noise level, joined across short breaths */
+function findSpeech(audio) {
+  const F = 320, n = Math.floor(audio.length / F), en = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; for (let j = i * F; j < (i + 1) * F; j++) s += audio[j] * audio[j]; en[i] = 10 * Math.log10(s / F + 1e-10); }
+  const sorted = Array.from(en).sort((a, b) => a - b);
+  const floor = sorted[Math.floor(n * 0.1)] || -90;
+  const thr = Math.max(floor + 12, -55);
+  const out = []; let st = -1, quiet = 0;
+  for (let i = 0; i < n; i++) {
+    if (en[i] > thr) { if (st < 0) st = i; quiet = 0; }
+    else if (st >= 0 && ++quiet > 17) { out.push([st, i - quiet + 1]); st = -1; quiet = 0; }
+  }
+  if (st >= 0) out.push([st, n]);
+  return out.filter(([a, b]) => b - a > 6).map(([a, b]) => ({ start: a * F / 16000, end: b * F / 16000 }));
+}
+
+/* ---------------- spotting screen changes ---------------- */
+async function sampleFrames(v, onProgress) {
+  // some browsers only hand out frames for a video that is on the page, so keep it there, tiny and invisible
+  Object.assign(v.style, { position: 'fixed', left: '0', top: '0', width: '2px', height: '2px', opacity: '0.01', pointerEvents: 'none' });
+  document.body.append(v);
+  try { return await sampleFramesIn(v, onProgress); } finally { v.pause(); v.remove(); }
+}
+async function sampleFramesIn(v, onProgress) {
+  const dur = v.duration, w = SAMPLE_W, hgt = Math.max(2, Math.round(SAMPLE_W * v.videoHeight / v.videoWidth));
+  const c = h('canvas', { width: w, height: hgt }), ctx = c.getContext('2d', { willReadFrequently: true });
+  const interval = Math.max(0.4, dur / 1500);
+  const times = [], grays = [];
+  const grab = (t) => {
+    ctx.drawImage(v, 0, 0, w, hgt);
+    const d = ctx.getImageData(0, 0, w, hgt).data, g = new Uint8Array(w * hgt);
+    for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
+    times.push(t); grays.push(g);
+  };
+  if (v.requestVideoFrameCallback) {                  // play through quickly, keeping a frame every interval
+    await seek(v, 0);
+    v.muted = true;
+    v.playbackRate = 8;
+    await new Promise((res) => {
+      let next = 0, last = performance.now();
+      const watchdog = setInterval(() => {
+        if (app.cancelled) { v.pause(); res(); }
+        if (performance.now() - last > 6000) { v.pause(); res(); }
+      }, 500);
+      const cb = (now, meta) => {
+        last = performance.now();
+        const t = meta.mediaTime;
+        if (t >= next) { grab(t); next = t + interval; onProgress(t / dur); }
+        if (!v.ended && !v.paused) v.requestVideoFrameCallback(cb);
+      };
+      v.onended = () => { clearInterval(watchdog); res(); };
+      v.requestVideoFrameCallback(cb);
+      v.play().catch(() => { clearInterval(watchdog); res(); });
+    });
+    v.pause(); v.playbackRate = 1;
+  }
+  // anything playback missed (an older browser, or the tab was in the background) is filled in by seeking
+  for (let t = times.length ? times[times.length - 1] + interval : 0; t < dur - interval / 2 && !app.cancelled; t += interval) {
+    await seek(v, t); grab(t); onProgress(t / dur);
+  }
+  await seek(v, Math.max(0, dur - 0.05)); grab(dur);
+  return { times, grays, w, h: hgt };
+}
+function nearestSample(t) {
+  const ts = app.samples.times; let lo = 0, hi = ts.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (ts[m] < t) lo = m + 1; else hi = m; }
+  if (lo > 0 && Math.abs(ts[lo - 1] - t) < Math.abs(ts[lo] - t)) lo--;
+  return lo;
+}
+function changeBetween(i, j) {
+  const a = app.samples.grays[i], b = app.samples.grays[j]; let n = 0;
+  for (let k = 0; k < a.length; k++) if (Math.abs(a[k] - b[k]) > PIXEL_CHANGE) n++;
+  return n / a.length;
+}
+const changeAt = (t1, t2) => app.samples ? changeBetween(nearestSample(t1), nearestSample(t2)) : 0;
+/* moments where the screen settles after changing: good picture candidates */
+function settledMoments(from, to) {
+  if (!app.samples) return [];
+  const ts = app.samples.times, out = [];
+  let i = Math.max(1, nearestSample(from));
+  const end = nearestSample(to);
+  let changed = true;
+  for (; i <= end && i < ts.length - 1; i++) {
+    const moving = changeBetween(i - 1, i) > SCREEN_CHANGE * 0.5;
+    if (moving) changed = true;
+    else if (changed && changeBetween(i, i + 1) <= SCREEN_CHANGE * 0.5) { out.push(ts[i]); changed = false; }
+  }
+  return out;
+}
+/* the best picture time in a step: the last calm moment, so the picture shows the result of what was said */
+function pictureTime(step) {
+  if (!app.samples) return Math.max(step.start, step.end - 0.3);
+  const ts = app.samples.times;
+  const lo = nearestSample(step.start + (step.end - step.start) * 0.35), hi = nearestSample(step.end);
+  for (let i = hi; i >= lo && i > 0; i--) {
+    if (i < ts.length - 1 && changeBetween(i - 1, i) <= SCREEN_CHANGE * 0.5 && changeBetween(i, i + 1) <= SCREEN_CHANGE * 0.5) return ts[i];
+  }
+  return Math.max(step.start, step.end - 0.3);
+}
+
+/* ---------------- transcription ---------------- */
+let tfMod = null, asrPipe = null, asrModel = null;
+async function getAsr(modelId, onDownload) {
+  if (asrPipe && asrModel === modelId) return asrPipe;
+  if (!tfMod) tfMod = await import(TF_URL);
+  const env = tfMod.env;
+  env.allowLocalModels = false;
+  env.useBrowserCache = false;
+  env.useCustomCache = true;
+  env.customCache = modelCache;
+  const files = {};
+  asrPipe = await tfMod.pipeline('automatic-speech-recognition', modelId, {
+    dtype: 'q8', device: 'wasm',
+    progress_callback: (p) => {
+      if (p.status === 'progress' && p.file) { files[p.file] = [p.loaded || 0, p.total || 0]; }
+      if (p.status === 'done' && p.file && files[p.file]) files[p.file][0] = files[p.file][1];
+      let a = 0, b = 0; for (const k in files) { a += files[k][0]; b += files[k][1]; }
+      onDownload(a, b);
+    },
+  });
+  asrModel = modelId;
+  return asrPipe;
+}
+function cleanRepeats(text) {                         // Whisper sometimes loops on a phrase; keep one copy
+  let t = text;
+  for (let n = 6; n >= 1; n--) {
+    const re = new RegExp('((?:\\b[\\w\'’-]+\\b[\\s,.]*){' + n + '})(?:\\1){2,}', 'gi');
+    t = t.replace(re, '$1');
+  }
+  return t.replace(/\s+/g, ' ').trim();
+}
+function junk(text) {
+  const t = text.replace(/\[[^\]]*\]|\([^)]*\)/g, '').trim();
+  if (!t || /^[\s.,!?-]*$/.test(t)) return true;
+  const words = t.toLowerCase().split(/\s+/);
+  return words.length > 12 && new Set(words).size / words.length < 0.3;
+}
+/* windows of up to 25 s that never cross a step boundary, cut at pauses so words are never split */
+function windowsFor(steps) {
+  const wins = [];
+  steps.forEach((st, si) => {
+    let cur = null;
+    for (const r of st.regions || [{ start: st.start, end: st.end }]) {
+      if (cur && r.end - cur.start <= 25) cur.end = r.end;
+      else { cur = { step: si, start: r.start, end: r.end }; wins.push(cur); }
+    }
+  });
+  return wins;
+}
+async function transcribe(audio, steps, modelId, ui) {
+  const asr = await getAsr(modelId, ui.download);
+  ui.downloaded();
+  const english = /\.en$/i.test(modelId);
+  const wins = windowsFor(steps);
+  const total = wins.reduce((a, w) => a + (w.end - w.start), 0) || 1;
+  let done = 0;
+  const out = [];
+  for (const w of wins) {
+    if (app.cancelled) throw new Error('cancelled');
+    const s0 = Math.max(0, Math.floor((w.start - 0.25) * 16000)), s1 = Math.min(audio.length, Math.ceil((w.end + 0.35) * 16000));
+    const len = (s1 - s0) / 16000;
+    const res = await asr(audio.slice(s0, s1), Object.assign({
+      return_timestamps: true, no_repeat_ngram_size: 6, max_new_tokens: Math.min(440, Math.ceil(len * 7) + 16),
+    }, english ? {} : { language: 'english', task: 'transcribe' }));
+    const chunks = res.chunks && res.chunks.length ? res.chunks : [{ timestamp: [0, len], text: res.text || '' }];
+    const regions = (steps[w.step].regions || []).filter((r) => r.start >= w.start - 0.01 && r.end <= w.end + 0.01);
+    for (const c of chunks) {
+      let a = c.timestamp[0] == null ? 0 : c.timestamp[0], b = c.timestamp[1] == null ? len : c.timestamp[1];
+      a = clamp(s0 / 16000 + a, w.start, w.end); b = clamp(s0 / 16000 + b, a + 0.2, w.end);
+      // snap to the measured pauses, which are more exact than Whisper's own times
+      const ra = regions.find((r) => Math.abs(r.start - a) < 0.7); if (ra) a = ra.start;
+      const rb = regions.find((r) => Math.abs(r.end - b) < 0.7); if (rb) b = Math.max(a + 0.2, rb.end);
+      const text = cleanRepeats(c.text.replace(/\[[^\]]*\]/g, ' ').replace(/\((?:[^)]*music[^)]*|[^)]*noise[^)]*)\)/gi, ' '));
+      if (!junk(text)) out.push({ id: uid(), start: +a.toFixed(2), end: +b.toFixed(2), text, step: w.step });
+    }
+    done += w.end - w.start;
+    ui.progress(done / total, w.end);
+    await sleep(0);                                   // let the page repaint; also keeps going in a background tab
+  }
+  steps.forEach((st, i) => { st.text = tidy(out.filter((x) => x.step === i).map((x) => x.text).join(' ')); });
+  return out.sort((a, b) => a.start - b.start).map(({ step, ...rest }) => rest);
+}
+
+/* captions the user already has (.vtt or .srt) */
+function parseCaptions(text) {
+  const out = [];
+  const toSec = (s) => { const p = s.trim().replace(',', '.').split(':').map(parseFloat); return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]; };
+  for (const block of text.replace(/\r/g, '').split(/\n\s*\n/)) {
+    const lines = block.split('\n'), i = lines.findIndex((l) => l.includes('-->'));
+    if (i < 0) continue;
+    const [a, b] = lines[i].split('-->');
+    const t = lines.slice(i + 1).join(' ').replace(/<[^>]+>/g, '').trim();
+    if (t) out.push({ id: uid(), start: toSec(a), end: toSec(b.split(/\s/).filter(Boolean)[0]), text: t });
+  }
+  return out;
+}
+
+/* ---------------- drafting the steps ---------------- */
+const FILLERS = /\b(?:um+|uh+|uhm|erm|hmm+|mm+)\b[,.]?\s*/gi;
+const OPENERS = /^(?:(?:okay|ok|alright|all right|so|and so|and then|then|now|and|well|right|next)\b[,]?\s+)+/i;
+function tidy(text) {
+  let t = text.replace(FILLERS, '').replace(/\s+/g, ' ').trim();
+  t = t.split(/(?<=[.!?])\s+/).map((s) => s.replace(OPENERS, '')).filter(Boolean).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+  return t;
+}
+/* steps from the narration's pauses: a pause where the screen also changed starts a new step */
+function stepsFromSpeech(regions, duration) {
+  if (!regions.length) return draftSteps([], duration);
+  const steps = [];
+  let cur = [regions[0]];
+  const push = () => steps.push({ id: uid(), start: cur[0].start, end: cur[cur.length - 1].end, text: '', pic: null, regions: cur });
+  for (let k = 1; k < regions.length; k++) {
+    const prev = regions[k - 1], r = regions[k];
+    const before = prev.end - 0.25;
+    const changed = Math.max(changeAt(before, r.start + 0.4), changeAt(before, Math.min(r.end, r.start + 1.5)));
+    const length = prev.end - cur[0].start;
+    if (changed > SCREEN_CHANGE || (length > 45 && r.start - prev.end >= 0.5)) { push(); cur = [r]; }
+    else cur.push(r);
+  }
+  push();
+  return steps;
+}
+/* steps from caption cues (when the user brings a caption file) */
+function draftSteps(sentences, duration) {
+  const steps = [];
+  if (!sentences.length) {                            // no narration: one step per new screen
+    const moments = settledMoments(0, duration);
+    const starts = moments.length ? moments : [0];
+    starts.forEach((t, i) => steps.push({ id: uid(), text: '', start: t, end: i + 1 < starts.length ? starts[i + 1] : duration, pic: null }));
+    return steps;
+  }
+  let cur = [sentences[0]];
+  const push = () => steps.push({ id: uid(), start: cur[0].start, end: cur[cur.length - 1].end, text: tidy(cur.map((s) => s.text).join(' ')), pic: null });
+  for (let k = 1; k < sentences.length; k++) {
+    const prev = sentences[k - 1], s = sentences[k];
+    const gap = s.start - prev.end;
+    const before = prev.end - 0.25;
+    const changed = Math.max(changeAt(before, s.start + 0.4), changeAt(before, Math.min(s.end, s.start + 1.5)));
+    const length = prev.end - cur[0].start;
+    if ((changed > SCREEN_CHANGE && gap >= 0.15) || (length > 45 && gap >= 0.6)) { push(); cur = [s]; }
+    else cur.push(s);
+  }
+  push();
+  return steps;
+}
+
+/* ---------------- pictures ---------------- */
+let grabVideo = null;                                 // a hidden player used for taking pictures
+async function grabber() {
+  if (!app.videoURL) return null;
+  if (!grabVideo || grabVideo.src !== app.videoURL) grabVideo = await loadVideoEl(app.videoURL);
+  return grabVideo;
+}
+function canvasData(c, quality = 0.9) {
+  const webp = c.toDataURL('image/webp', quality);
+  return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/jpeg', quality);
+}
+async function takePicture(t) {
+  const v = await grabber();
+  if (!v) return null;
+  await seek(v, t);
+  const scale = Math.min(1, 3200 / Math.max(v.videoWidth, v.videoHeight));
+  const c = h('canvas', { width: Math.round(v.videoWidth * scale), height: Math.round(v.videoHeight * scale) });
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return { t: +t.toFixed(2), src: canvasData(c, 0.92), w: c.width, h: c.height, crop: null, view: null };
+}
+function loadImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+async function renderPicture(pic, maxW, quality) {   // apply the crop and size it down
+  const img = await loadImage(pic.src);
+  const c0 = pic.crop || { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+  const scale = Math.min(1, maxW / c0.w);
+  const c = h('canvas', { width: Math.max(1, Math.round(c0.w * scale)), height: Math.max(1, Math.round(c0.h * scale)) });
+  const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, c0.x, c0.y, c0.w, c0.h, 0, 0, c.width, c.height);
+  return canvasData(c, quality);
+}
+async function refreshView(pic) { if (pic) pic.view = await renderPicture(pic, 1100, 0.85); }
+async function thumbAt(t) {
+  const v = await grabber();
+  if (!v) return null;
+  await seek(v, t);
+  const c = h('canvas', { width: 240, height: Math.round(240 * v.videoHeight / v.videoWidth) });
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.75);
+}
+
+/* ---------------- processing a new recording ---------------- */
+const STAGES = [
+  ['read', 'Reading the recording'],
+  ['frames', 'Watching for screen changes'],
+  ['model', 'Getting the speech model ready'],
+  ['listen', 'Writing out your narration'],
+  ['draft', 'Drafting steps and taking pictures'],
+];
+function stageUI() {
+  const list = $('#stages'); list.textContent = '';
+  const els = {};
+  for (const [k, label] of STAGES) {
+    const bar = h('div', { class: 'bar' }, h('i'));
+    const detail = h('div', { class: 'detail' });
+    const li = h('li', { class: 'stage' }, h('span', { class: 'ic' }), h('strong', { text: label }), detail, bar);
+    bar.hidden = true;
+    els[k] = { li, detail, bar };
+    list.append(li);
+  }
+  return {
+    start(k, text) { els[k].li.className = 'stage active'; if (text != null) els[k].detail.textContent = text; },
+    done(k, text) { els[k].li.className = 'stage done'; els[k].bar.hidden = true; if (text != null) els[k].detail.textContent = text; },
+    skip(k, text) { els[k].li.className = 'stage skip'; els[k].bar.hidden = true; els[k].detail.textContent = text || 'Skipped'; },
+    bar(k, f, text) { els[k].bar.hidden = false; els[k].bar.firstChild.style.width = Math.round(clamp(f, 0, 1) * 100) + '%'; if (text != null) els[k].detail.textContent = text; },
+  };
+}
+function askChoice(message, choices) {               // inline question inside the processing view
+  return new Promise((res) => {
+    const box = $('#procAlert'); box.textContent = '';
+    const row = h('div', { class: 'row' }, choices.map(([label, val, primary]) => h('button', { class: 'btn' + (primary ? ' primary' : ''), type: 'button', text: label, onclick: () => { box.textContent = ''; res(val); } })));
+    box.append(h('div', { class: 'alert' }, h('p', { text: message }), row));
+  });
+}
+
+async function openRecording(file) {
+  const mode = (document.querySelector('input[name=model]:checked') || {}).value || 'accurate';
+  store('tb-model', mode);
+  app.cancelled = false; app.samples = null; app.undo = []; app.picking = null;
+  if (app.videoURL) URL.revokeObjectURL(app.videoURL);
+  app.file = file; app.videoURL = URL.createObjectURL(playableBlob(file));
+  show('procView');
+  $('#procTitle').textContent = 'Working on ' + file.name;
+  $('#procAlert').textContent = '';
+  const ui = stageUI();
+  const t0 = performance.now();
+  try {
+    ui.start('read');
+    const v = await loadVideoEl(app.videoURL);
+    const video = { name: file.name, size: file.size, duration: v.duration, width: v.videoWidth, height: v.videoHeight };
+    if (!isFinite(video.duration) || !video.width) throw new Error('This browser can’t read that video file.');
+    const project = newProject(video);
+    let audio = null;
+    if (!app.captions) {
+      try { audio = await decodeAudio(file); }
+      catch (_) {
+        if (mode !== 'none' && v.mozHasAudio !== false) {
+          const pick = await askChoice('The sound in this file can\u2019t be read directly. The builder can listen while the video plays, which takes as long as the recording (' + fmt(video.duration) + ').',
+            [['Listen in real time', 'rt', true], ['Skip the transcript', 'skip']]);
+          if (pick === 'rt') audio = await captureAudioRealtime(app.videoURL, (f) => ui.bar('read', f, 'Listening in real time\u2026'));
+        }
+      }
+    }
+    const speech = audio ? findSpeech(audio) : [];
+    ui.done('read', fmt(video.duration) + ' long, ' + video.width + ' × ' + video.height);
+
+    ui.start('frames');
+    app.samples = await sampleFrames(v, (f) => ui.bar('frames', f));
+    if (app.cancelled) throw new Error('cancelled');
+    ui.done('frames', app.samples.times.length + ' frames checked');
+
+    let sentences = [];
+    if (app.captions) {
+      sentences = app.captions;
+      project.steps = draftSteps(sentences, video.duration);
+      ui.skip('model', 'Using your caption file'); ui.skip('listen', sentences.length + ' captions');
+    } else {
+      project.steps = stepsFromSpeech(speech, video.duration);
+      if (!audio || !speech.length || mode === 'none') {
+        ui.skip('model'); ui.skip('listen', mode === 'none' ? 'No transcript chosen' : !audio ? 'No sound found' : 'No speech found in the recording');
+      } else {
+        ui.start('model', 'Loading\u2026');
+        const modelId = MODEL_OVERRIDE || MODELS[mode] || MODELS.accurate;
+        const talk = speech.reduce((a, r) => a + r.end - r.start, 0);
+        let listenStart = 0;
+        try {
+          sentences = await transcribe(audio, project.steps, modelId, {
+            download: (a, b) => ui.bar('model', b ? a / b : 0, b ? (a / 1048576).toFixed(0) + ' of ' + (b / 1048576).toFixed(0) + ' MB' : 'Loading\u2026'),
+            downloaded: () => { ui.done('model', 'Ready'); ui.start('listen', 'Starting\u2026'); listenStart = performance.now(); },
+            progress: (f, at) => {
+              const spent = (performance.now() - listenStart) / 1000, left = f > 0.05 ? spent / f - spent : null;
+              ui.bar('listen', f, 'Up to ' + fmt(at) + ' of ' + fmt(video.duration) + (left != null ? ' \u00b7 about ' + Math.max(1, Math.round(left / 60)) + ' min left' : ''));
+            },
+          });
+          ui.done('listen', sentences.length + ' sentences from ' + fmt(talk) + ' of speech');
+        } catch (err) {
+          if (app.cancelled) throw err;
+          console.error(err);
+          const pick = await askChoice('The speech model couldn\u2019t be loaded or run (' + (err.message || err) + '). This usually means the internet connection dropped while downloading it.',
+            [['Try again', 'retry', true], ['Continue without a transcript', 'skip']]);
+          if (pick === 'retry') { asrPipe = null; return openRecording(file); }
+          ui.skip('model'); ui.skip('listen', 'Skipped');
+        }
+      }
+    }
+
+    ui.start('draft');
+    project.sentences = sentences;
+    project.steps.forEach((st) => { delete st.regions; });
+    for (let i = 0; i < project.steps.length; i++) {
+      if (app.cancelled) throw new Error('cancelled');
+      const st = project.steps[i];
+      st.pic = await takePicture(pictureTime(st));
+      await refreshView(st.pic);
+      ui.bar('draft', (i + 1) / project.steps.length, 'Picture ' + (i + 1) + ' of ' + project.steps.length);
+    }
+    ui.done('draft', project.steps.length + ' steps');
+    app.project = project;
+    app.captions = null; $('#capName').textContent = '';
+    console.info('Tutorial Builder: processed in ' + Math.round((performance.now() - t0) / 1000) + ' s');
+    autosave();
+    openEditor();
+  } catch (err) {
+    if (app.cancelled || (err && err.message === 'cancelled')) { show('startView'); return; }
+    console.error(err);
+    $('#procAlert').textContent = '';
+    $('#procAlert').append(h('div', { class: 'alert' }, h('p', { text: 'Something went wrong: ' + (err.message || err) }),
+      h('button', { class: 'btn', type: 'button', text: 'Back to the start', onclick: () => show('startView') })));
+  }
+}
+
+/* ---------------- editor ---------------- */
+function snapshot() {
+  const p = app.project;
+  return { title: p.title, intro: p.intro, steps: p.steps.map((s) => Object.assign({}, s, { pic: s.pic && Object.assign({}, s.pic) })) };
+}
+function remember() { app.undo.push(snapshot()); if (app.undo.length > 40) app.undo.shift(); $('#undoBtn').disabled = false; }
+function undo() {
+  const s = app.undo.pop();
+  if (!s) return;
+  Object.assign(app.project, s);
+  $('#undoBtn').disabled = !app.undo.length;
+  renderDoc(); changed();
+  toast('Undone');
+}
+function changed() { app.project.saved = Date.now(); autosave(); }
+let saveT = 0;
+function autosave() {
+  clearTimeout(saveT);
+  saveT = setTimeout(() => { if (app.project) db.set('kv', 'last', serialize(false)); }, 1200);
+}
+function serialize(withViews) {
+  const p = app.project;
+  return {
+    format: 'tutorial-builder', version: 1, id: p.id, title: p.title, intro: p.intro, video: p.video, saved: p.saved,
+    sentences: p.sentences,
+    steps: p.steps.map((s) => ({ id: s.id, text: s.text, start: s.start, end: s.end, pic: s.pic && { t: s.pic.t, src: s.pic.src, w: s.pic.w, h: s.pic.h, crop: s.pic.crop, view: withViews ? s.pic.view : undefined } })),
+  };
+}
+async function loadProject(data) {
+  if (!data || data.format !== 'tutorial-builder' || !Array.isArray(data.steps)) throw new Error('That isn’t a Tutorial Builder project file.');
+  const p = { id: data.id || uid(), title: data.title || 'Untitled tutorial', intro: data.intro || '', video: data.video || null, saved: data.saved || Date.now(),
+    sentences: (data.sentences || []).map((s) => ({ id: s.id || uid(), start: +s.start || 0, end: +s.end || 0, text: String(s.text || '') })),
+    steps: data.steps.map((s) => ({ id: s.id || uid(), text: String(s.text || ''), start: +s.start || 0, end: +s.end || 0, pic: s.pic && s.pic.src ? Object.assign({ crop: null }, s.pic) : null })) };
+  for (const s of p.steps) if (s.pic && !s.pic.view) await refreshView(s.pic);
+  app.project = p; app.undo = []; app.samples = null; app.picking = null;
+  if (!app.file || !p.video || app.file.name !== p.video.name) { app.file = null; if (app.videoURL) URL.revokeObjectURL(app.videoURL); app.videoURL = null; }
+  openEditor();
+}
+
+function openEditor() {
+  show('editView');
+  const p = app.project;
+  $('#titleIn').value = p.title;
+  $('#introIn').value = p.intro;
+  grow($('#introIn'));
+  renderDoc();
+  renderSide();
+}
+function grow(ta) { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; }
+
+function renderDoc() {
+  const p = app.project, list = $('#steps');
+  const scroll = window.scrollY;
+  list.textContent = '';
+  $('#count').textContent = p.steps.length + (p.steps.length === 1 ? ' step' : ' steps') + (p.video ? ' from ' + fmt(p.video.duration) + ' of video' : '');
+  p.steps.forEach((s, i) => {
+    list.append(stepCard(s, i));
+    list.append(h('li', { class: 'gap', 'aria-hidden': 'false' }, h('button', { class: 'btn quiet', type: 'button', text: '+ Add a step here', onclick: () => addStep(i + 1) })));
+  });
+  if (!p.steps.length) list.append(h('li', {}, h('button', { class: 'btn', type: 'button', text: '+ Add the first step', onclick: () => addStep(0) })));
+  list.querySelectorAll('textarea').forEach(grow);
+  window.scrollTo(0, scroll);
+}
+function stepCard(s, i) {
+  const p = app.project;
+  const ta = h('textarea', { class: 'text-in', rows: 1, 'aria-label': 'Step ' + (i + 1) + ' text', placeholder: 'What should students do in this step?' });
+  ta.value = s.text;
+  ta.addEventListener('input', () => { s.text = ta.value; grow(ta); changed(); });
+  ta.addEventListener('focus', () => highlightTranscript(s));
+  const body = h('div', { class: 'body' }, ta);
+  if (s.pic) {
+    body.append(h('div', { class: 'pic' }, h('img', { src: s.pic.view || s.pic.src, alt: 'Picture for step ' + (i + 1) })));
+    body.append(h('div', { class: 'pic-tools' },
+      h('button', { class: 'btn quiet', type: 'button', text: 'Choose another picture', onclick: () => startPicking(s) }),
+      h('button', { class: 'btn quiet', type: 'button', text: s.pic.crop ? 'Change crop' : 'Crop', onclick: () => openCrop(s) }),
+      h('button', { class: 'btn quiet danger', type: 'button', text: 'Remove picture', onclick: () => { remember(); s.pic = null; renderDoc(); changed(); } })));
+  } else {
+    body.append(h('div', { class: 'nopic' }, 'No picture.', h('button', { class: 'btn quiet', type: 'button', text: 'Add a picture from the recording', onclick: () => startPicking(s) })));
+  }
+  const hasTime = p.video && s.end > s.start;
+  body.append(h('div', { class: 'step-tools' },
+    hasTime ? h('button', { class: 'btn quiet', type: 'button', text: '▶ Play', title: 'Play this part of the recording', onclick: () => playStep(s) }) : null,
+    h('button', { class: 'btn quiet', type: 'button', text: 'Split at cursor', title: 'Split this step where the text cursor is', onclick: () => splitStep(s, ta) }),
+    i < p.steps.length - 1 ? h('button', { class: 'btn quiet', type: 'button', text: 'Merge with next', onclick: () => mergeStep(i) }) : null,
+    i > 0 ? h('button', { class: 'btn quiet', type: 'button', text: 'Move up', onclick: () => moveStep(i, -1) }) : null,
+    i < p.steps.length - 1 ? h('button', { class: 'btn quiet', type: 'button', text: 'Move down', onclick: () => moveStep(i, 1) }) : null,
+    h('button', { class: 'btn quiet danger', type: 'button', text: 'Delete', onclick: () => deleteStep(i) }),
+    hasTime ? h('span', { class: 'time', text: fmt(s.start) + '–' + fmt(s.end) }) : null));
+  const li = h('li', { class: 'step' + (app.picking === s.id ? ' picking' : '') + (app.playingStep === s.id ? ' playing' : ''), 'data-id': s.id },
+    h('span', { class: 'num', text: String(i + 1) }), body);
+  return li;
+}
+function addStep(at) {
+  remember();
+  const p = app.project, prev = p.steps[at - 1], next = p.steps[at];
+  const start = prev ? prev.end : 0, end = next ? next.start : (p.video ? p.video.duration : 0);
+  const s = { id: uid(), text: '', start, end: Math.max(start, end), pic: null };
+  p.steps.splice(at, 0, s);
+  renderDoc(); changed();
+  const ta = $('[data-id="' + s.id + '"] textarea'); ta && ta.focus();
+}
+function deleteStep(i) {
+  remember();
+  app.project.steps.splice(i, 1);
+  renderDoc(); changed();
+  toast('Step ' + (i + 1) + ' deleted', { label: 'Undo', run: undo });
+}
+function moveStep(i, d) {
+  remember();
+  const st = app.project.steps; const [s] = st.splice(i, 1); st.splice(i + d, 0, s);
+  renderDoc(); changed();
+}
+function mergeStep(i) {
+  remember();
+  const st = app.project.steps, a = st[i], b = st[i + 1];
+  a.text = [a.text.trim(), b.text.trim()].filter(Boolean).join(' ');
+  a.start = Math.min(a.start, b.start); a.end = Math.max(a.end, b.end);
+  if (!a.pic) a.pic = b.pic;
+  st.splice(i + 1, 1);
+  renderDoc(); changed();
+  toast('Steps ' + (i + 1) + ' and ' + (i + 2) + ' merged', { label: 'Undo', run: undo });
+}
+async function splitStep(s, ta) {
+  const pos = ta.selectionStart || 0;
+  const before = s.text.slice(0, pos).trim(), after = s.text.slice(pos).trim();
+  if (!before || !after) { toast('Put the text cursor where the new step should begin, then split'); ta.focus(); return; }
+  remember();
+  // split the time at the sentence boundary that best matches where the text was split
+  const inStep = app.project.sentences.filter((x) => x.start >= s.start - 0.05 && x.start < s.end);
+  let cut = s.start + (s.end - s.start) * (pos / Math.max(1, s.text.length));
+  if (inStep.length > 1) {
+    let best = inStep[1], bestD = Infinity, chars = 0;
+    const total = inStep.reduce((a, x) => a + x.text.length, 0) || 1;
+    inStep.forEach((x, k) => { if (k) { const d = Math.abs(chars / total - pos / s.text.length); if (d < bestD) { bestD = d; best = x; } } chars += x.text.length; });
+    cut = best.start;
+  }
+  const st = app.project.steps, i = st.indexOf(s);
+  const n = { id: uid(), text: after, start: cut, end: s.end, pic: null };
+  s.text = before; s.end = cut;
+  st.splice(i + 1, 0, n);
+  if (app.videoURL) { n.pic = await takePicture(pictureTime(n)); await refreshView(n.pic); }
+  renderDoc(); changed();
+  toast('Split into steps ' + (i + 1) + ' and ' + (i + 2), { label: 'Undo', run: undo });
+}
+
+/* ---------------- side panel: player, transcript, picture picking ---------------- */
+let player = null;
+function renderSide() {
+  const side = $('#side'); side.textContent = '';
+  const p = app.project;
+  if (app.videoURL) {
+    if (!player || player.dataset.url !== app.videoURL) {
+      player = h('video', { controls: true, playsinline: true, preload: 'auto' });
+      player.dataset.url = app.videoURL; player.src = app.videoURL;
+      player.addEventListener('timeupdate', onPlayerTime);
+    }
+    side.append(player);
+  } else {
+    side.append(h('div', { class: 'relink' },
+      h('strong', { text: p.video ? 'Open ' + p.video.name + ' again' : 'No recording open' }),
+      h('span', { class: 'muted small', text: 'To play the recording or choose different pictures, open the same video file again.' }),
+      h('button', { class: 'btn', type: 'button', text: 'Open the recording', onclick: () => $('#relinkIn').click() })));
+  }
+  if (app.picking) { side.append(pickPanel()); return; }
+  side.append(h('div', { class: 'tabs', role: 'tablist' }, h('button', { type: 'button', role: 'tab', 'aria-selected': 'true', text: 'Transcript' })));
+  side.append(transcriptPanel());
+}
+function transcriptPanel() {
+  const p = app.project, box = h('div', { class: 'tx', id: 'tx' });
+  if (!p.sentences.length) { box.append(h('p', { class: 'muted small', text: 'No transcript for this recording.' })); return box; }
+  let si = 0;
+  p.sentences.forEach((s) => {
+    while (si < p.steps.length - 1 && s.start >= p.steps[si + 1].start - 0.05) si++;
+    const stepNo = p.steps.length ? (s.start >= p.steps[si].start - 0.05 ? si + 1 : null) : null;
+    if (stepNo && (!box.lastStep || box.lastStep !== stepNo)) { box.append(h('div', { class: 'tx-break', text: 'Step ' + stepNo })); box.lastStep = stepNo; }
+    const text = h('span', { contenteditable: 'true', spellcheck: 'true', text: s.text });
+    text.addEventListener('input', () => { s.text = text.textContent; changed(); });
+    box.append(h('div', { class: 'tx-row', 'data-sid': s.id },
+      h('button', { type: 'button', text: fmt(s.start), title: 'Play from here', onclick: () => playFrom(s.start) }), text));
+  });
+  return box;
+}
+function highlightTranscript(step) {
+  document.querySelectorAll('.tx-row.now').forEach((r) => r.classList.remove('now'));
+  const rows = app.project.sentences.filter((x) => x.start >= step.start - 0.05 && x.start < step.end).map((x) => document.querySelector('[data-sid="' + x.id + '"]')).filter(Boolean);
+  rows.forEach((r) => r.classList.add('now'));
+  if (rows[0]) rows[0].scrollIntoView({ block: 'nearest' });
+}
+function playFrom(t, until) {
+  if (!player) { toast('Open the recording again to play it'); return; }
+  player.currentTime = t; player.dataset.until = until != null ? String(until) : '';
+  player.play().catch(() => {});
+}
+function playStep(s) { app.playingStep = s.id; playFrom(s.start, s.end); document.querySelectorAll('.step.playing').forEach((e) => e.classList.remove('playing')); const el = $('[data-id="' + s.id + '"]'); el && el.classList.add('playing'); }
+function onPlayerTime() {
+  const t = player.currentTime, until = parseFloat(player.dataset.until);
+  if (!isNaN(until) && t >= until) { player.pause(); player.dataset.until = ''; app.playingStep = null; document.querySelectorAll('.step.playing').forEach((e) => e.classList.remove('playing')); }
+  const p = app.project; if (!p) return;
+  document.querySelectorAll('.tx-row.now').forEach((r) => r.classList.remove('now'));
+  const cur = p.sentences.find((s) => t >= s.start && t < s.end + 0.3);
+  if (cur) { const r = document.querySelector('[data-sid="' + cur.id + '"]'); if (r) r.classList.add('now'); }
+}
+
+function startPicking(s) {
+  if (!app.videoURL) { toast('Open the recording again to choose pictures from it'); $('#relinkIn').click(); return; }
+  app.picking = s.id;
+  renderDoc(); renderSide();
+  player.currentTime = s.pic ? s.pic.t : pictureTime(s);
+  $('.side').scrollTop = 0;
+}
+function pickPanel() {
+  const s = app.project.steps.find((x) => x.id === app.picking), i = app.project.steps.indexOf(s);
+  const strip = h('div', { class: 'strip' });
+  const wrap = h('div', { class: 'side-in', style: 'padding:0' },
+    h('div', { class: 'pick-head' }, h('strong', { text: 'Choose a picture for step ' + (i + 1) }),
+      h('span', { class: 'muted small', text: 'Pick a moment below or move the video to any frame, then use it.' })),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary', type: 'button', text: 'Use this frame', onclick: async () => {
+        remember();
+        const pic = await takePicture(player.currentTime);
+        if (s.pic && s.pic.crop && pic && s.pic.w === pic.w && s.pic.h === pic.h) pic.crop = s.pic.crop;   // keep the same crop
+        await refreshView(pic);
+        s.pic = pic; app.picking = null; renderDoc(); renderSide(); changed();
+        toast('Picture updated');
+      } }),
+      h('button', { class: 'btn', type: 'button', text: 'Cancel', onclick: () => { app.picking = null; renderDoc(); renderSide(); } }),
+      h('span', { class: 'muted small', id: 'pickTime' })),
+    strip);
+  fillStrip(s, strip);
+  return wrap;
+}
+async function fillStrip(s, strip) {
+  const span = Math.max(4, (s.end - s.start) * 0.25);
+  let times = app.samples ? settledMoments(Math.max(0, s.start - span), s.end + span) : [];
+  if (times.length < 4) for (let k = 0; k <= 5; k++) times.push(s.start + (s.end - s.start) * k / 5);
+  times = [...new Set(times.map((t) => +t.toFixed(1)))].sort((a, b) => a - b).slice(0, 12);
+  for (const t of times) {
+    if (app.picking !== s.id) return;
+    const src = await thumbAt(t);
+    if (!src || app.picking !== s.id) return;
+    const b = h('button', { type: 'button', title: 'Show ' + fmt(t), onclick: () => { player.pause(); player.currentTime = t; strip.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); } },
+      h('img', { src, alt: 'Frame at ' + fmt(t) }), h('span', { text: fmt(t) }));
+    strip.append(b);
+  }
+}
+
+/* ---------------- crop ---------------- */
+function openCrop(s) {
+  const pic = s.pic; if (!pic) return;
+  let rect = pic.crop ? Object.assign({}, pic.crop) : null;
+  const img = h('img', { src: pic.src, alt: 'Picture to crop', draggable: 'false' });
+  const box = h('div', { class: 'crop-box', hidden: true });
+  const area = h('div', { class: 'crop-wrap' }, img, box);
+  const place = () => {
+    if (!rect) { box.hidden = true; return; }
+    const k = img.clientWidth / pic.w;
+    Object.assign(box.style, { left: rect.x * k + 'px', top: rect.y * k + 'px', width: rect.w * k + 'px', height: rect.h * k + 'px' });
+    box.hidden = false;
+  };
+  img.onload = place;
+  let start = null;
+  const pt = (e) => { const r = img.getBoundingClientRect(), k = pic.w / r.width; return { x: clamp((e.clientX - r.left) * k, 0, pic.w), y: clamp((e.clientY - r.top) * k, 0, pic.h) }; };
+  area.addEventListener('pointerdown', (e) => { start = pt(e); area.setPointerCapture(e.pointerId); e.preventDefault(); });
+  area.addEventListener('pointermove', (e) => {
+    if (!start) return; const q = pt(e);
+    rect = { x: Math.round(Math.min(start.x, q.x)), y: Math.round(Math.min(start.y, q.y)), w: Math.round(Math.abs(q.x - start.x)), h: Math.round(Math.abs(q.y - start.y)) };
+    place();
+  });
+  area.addEventListener('pointerup', () => { start = null; if (rect && (rect.w < 20 || rect.h < 20)) { rect = null; place(); } });
+  const d = dialog('Crop the picture', [
+    h('p', { class: 'muted', text: 'Drag across the part students need to see. The full picture is kept, so you can change this later.' }), area,
+  ], [
+    ['Use the whole picture', async () => { remember(); pic.crop = null; await refreshView(pic); renderDoc(); changed(); return true; }],
+    ['Cancel', () => true],
+    ['Apply crop', async () => { if (!rect) { toast('Drag across the picture first'); return false; } remember(); pic.crop = rect; await refreshView(pic); renderDoc(); changed(); return true; }, true],
+  ], true);
+  window.addEventListener('resize', place, { once: true });
+  return d;
+}
+
+/* ---------------- dialogs ---------------- */
+function dialog(title, content, buttons, wide) {
+  const layer = $('#layer');
+  const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey); };
+  const foot = h('div', { class: 'foot' }, buttons.map(([label, fn, primary]) => h('button', { class: 'btn' + (primary ? ' primary' : ''), type: 'button', text: label, onclick: async () => { if ((await fn()) !== false) close(); } })));
+  const box = h('div', { class: 'dialog' + (wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, h('h2', { text: title }), content, foot);
+  const scrim = h('div', { class: 'scrim', onclick: (e) => { if (e.target === scrim) close(); } }, box);
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  layer.append(scrim);
+  const first = box.querySelector('textarea, input, .foot .primary'); first && first.focus();
+  return { close, box };
+}
+
+/* ---------------- tidy wording with Claude (copy a prompt, paste the reply) ---------------- */
+function polishPrompt(withPictures) {
+  const p = app.project;
+  const lines = p.steps.map((s, i) => {
+    const said = p.sentences.filter((x) => x.start >= s.start - 0.05 && x.start < s.end).map((x) => x.text).join(' ').trim();
+    return (i + 1) + '. [' + fmt(s.start) + '–' + fmt(s.end) + '] ' + (said || s.text || '(no narration)') + (s.text && said && plain(s.text) !== plain(tidy(said)) ? '\n   My current wording: ' + s.text : '');
+  });
+  return [
+    'I recorded a screen video showing students how to do a task in desktop GIS software, and a speech-to-text tool wrote out my narration. Below are the steps of the tutorial, each with what I said during it.',
+    '',
+    'Rewrite each step as a short, clear instruction for students following along in the software.',
+    '- Keep exactly ' + p.steps.length + ' steps, in the same order and with the same numbers.',
+    '- Use the imperative ("Open…", "Set…", "Click…").',
+    '- Put names of menus, tools, buttons, fields and layers in **double asterisks**, and use ▸ between menu levels (for example **Vector** ▸ **Geoprocessing Tools** ▸ **Buffer**).',
+    ...(withPictures ? ['- Each step\u2019s screenshot is attached above, labelled with its step number. Use it to name the menus, buttons, fields and layers exactly as they appear on screen, and to correct misheard words. Don\u2019t describe the picture itself.'] : []),
+    '- If I explained why a step matters, keep that as a short second sentence.',
+    '- Fix words the transcription obviously misheard, using the GIS context. Don’t add actions or facts I didn’t say.',
+    '- Where a step has no narration, write a sensible instruction from the neighbouring steps, or leave it as "(no narration)".',
+    '- Reply with only the numbered list, one step per line, like "1. Open **Vector** ▸ …". No headings or notes.',
+    '',
+    'Tutorial: ' + (p.title || 'Untitled'),
+    '',
+    ...lines,
+  ].join('\n');
+}
+function parseNumbered(text, count) {
+  const out = {}; let cur = null;
+  for (const line of text.replace(/\r/g, '').split('\n')) {
+    const m = line.match(/^\s*(?:\*\*)?(\d+)(?:\*\*)?[.)]\s+(.*)$/);
+    if (m) { cur = +m[1]; out[cur] = m[2].trim(); }
+    else if (cur && line.trim() && !/^#/.test(line)) out[cur] += ' ' + line.trim();
+  }
+  return Object.keys(out).filter((k) => k >= 1 && k <= count).map((k) => [+k, out[k]]);
+}
+function openPolishManual() {
+  const prompt = polishPrompt();
+  const reply = h('textarea', { 'aria-label': 'Claude’s reply', placeholder: 'Paste Claude’s numbered list here' });
+  const status = h('span', { class: 'muted small' });
+  const copy = h('button', { class: 'btn', type: 'button', text: 'Copy the prompt', onclick: async () => {
+    try { await navigator.clipboard.writeText(prompt); status.textContent = 'Copied. Paste it into a chat with Claude.'; }
+    catch (_) { pre.select(); status.textContent = 'Press ⌘C to copy the selected prompt.'; }
+  } });
+  const pre = h('textarea', { readonly: true, 'aria-label': 'Prompt', style: 'min-height:120px' }); pre.value = prompt;
+  dialog('Tidy the wording with Claude', [
+    h('ol', {}, h('li', { text: 'Copy the prompt and paste it into a new chat with Claude.' }), h('li', { text: 'Copy Claude’s numbered list and paste it below.' }), h('li', { text: 'Apply it. Undo puts your old wording back.' })),
+    h('div', { class: 'row' }, copy, status), pre, reply,
+  ], [
+    ['Cancel', () => true],
+    ['Apply to my steps', () => {
+      const items = parseNumbered(reply.value, app.project.steps.length);
+      if (!items.length) { toast('Paste the numbered list from Claude first'); return false; }
+      remember();
+      for (const [n, text] of items) app.project.steps[n - 1].text = text;
+      renderDoc(); changed();
+      const missing = app.project.steps.length - items.length;
+      toast('Updated ' + items.length + ' step' + (items.length === 1 ? '' : 's') + (missing > 0 ? '. ' + missing + ' had no match and kept their wording.' : ''), { label: 'Undo', run: undo });
+      return true;
+    }, true],
+  ]);
+}
+
+/* ---------------- tidy wording with Claude through the user's own API key ---------------- */
+const KEY_STORE = 'tb-claude-key', MODEL_STORE = 'tb-claude-model';
+const CLAUDE_MODELS = [['claude-sonnet-5-5', 'Claude Sonnet 5.5 (recommended)'], ['claude-opus-5-5', 'Claude Opus 5.5 (most careful, costs more)'], ['claude-haiku-4-5-20251001', 'Claude Haiku 4.5 (fastest, cheapest)']];
+const getKey = () => store(KEY_STORE) || '';
+function setKey(k) { try { if (k) localStorage.setItem(KEY_STORE, k); else localStorage.removeItem(KEY_STORE); } catch (_) {} }
+function openPolish() { if (getKey()) openPolishApi(); else openKeyDialog(); }
+function openKeyDialog() {
+  const input = h('input', { type: 'password', id: 'keyIn', autocomplete: 'off', spellcheck: 'false', placeholder: 'sk-ant-\u2026', style: 'width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font:14px var(--mono)' });
+  dialog('Tidy the wording with Claude', [
+    h('p', { text: 'Claude rewrites each step as a short instruction for students, using what you said and the step\u2019s picture.' }),
+    h('label', { for: 'keyIn' }, h('strong', { text: 'Your Claude API key' })), input,
+    h('p', { class: 'muted small', text: 'The key is kept only in this browser on this computer. It is never put into your project or tutorial files, and it is sent only to Anthropic. Each tidy-up is charged to your API account, usually a few cents.' }),
+    h('p', { class: 'small' }, 'No key? ', h('button', { class: 'btn quiet', type: 'button', text: 'Copy a prompt to paste into a chat instead', onclick: () => { $('.scrim').remove(); openPolishManual(); } })),
+  ], [
+    ['Cancel', () => true],
+    ['Save key and continue', () => {
+      const k = input.value.trim();
+      if (!/^sk-ant-/.test(k)) { toast('That doesn\u2019t look like a Claude API key. It starts with sk-ant-'); return false; }
+      setKey(k); setTimeout(openPolishApi, 0); return true;
+    }, true],
+  ]);
+}
+function imagePart(dataUrl) {
+  const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.*)$/.exec(dataUrl || '');
+  return m ? { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } } : null;
+}
+async function askClaude(prompt, pictures, model, signal) {
+  const content = [];
+  pictures.forEach((pic, i) => {
+    const part = pic && imagePart(pic.view || pic.src);
+    if (part) { content.push({ type: 'text', text: 'Screenshot for step ' + (i + 1) + ':' }); content.push(part); }
+  });
+  content.push({ type: 'text', text: prompt });
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal,
+      headers: { 'content-type': 'application/json', 'x-api-key': getKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'user', content }] }),
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw err;
+    throw new Error('Couldn\u2019t reach Claude. Check your internet connection and try again.');
+  }
+  let data = null; try { data = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    const msg = data && data.error && data.error.message || res.statusText;
+    if (res.status === 401) throw Object.assign(new Error('Claude didn\u2019t accept that API key. Check it in the Claude Console, then enter it again.'), { badKey: true });
+    if (res.status === 429 || res.status === 529) throw new Error('Claude is busy right now. Wait a minute and try again.');
+    if (res.status === 400 && /credit/i.test(msg)) throw new Error('Your API account is out of credit. Add credit in the Claude Console.');
+    throw new Error('Claude returned an error: ' + msg);
+  }
+  return (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+}
+function openPolishApi() {
+  const steps = app.project.steps;
+  const withPics = h('input', { type: 'checkbox', id: 'withPics' }); withPics.checked = steps.some((s) => s.pic);
+  withPics.disabled = !steps.some((s) => s.pic);
+  const sel = h('select', { id: 'modelSel', style: 'padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg)' },
+    CLAUDE_MODELS.map(([id, label]) => h('option', { value: id, text: label })));
+  sel.value = store(MODEL_STORE) || CLAUDE_MODELS[0][0];
+  const status = h('p', { class: 'muted small', role: 'status' });
+  const key = getKey();
+  let ctrl = null;
+  const d = dialog('Tidy the wording with Claude', [
+    h('p', { text: 'Claude rewrites all ' + steps.length + ' steps as short instructions for students, from what you said in each one. Undo puts your wording back.' }),
+    h('label', { class: 'check', for: 'withPics' }, withPics, 'Send the pictures too, so Claude can name what is on screen'),
+    h('label', { class: 'check', for: 'modelSel' }, 'Model', sel),
+    status,
+    h('p', { class: 'muted small' }, 'Using the API key ending \u2026' + key.slice(-4) + '. ',
+      h('button', { class: 'btn quiet', type: 'button', text: 'Remove this key', onclick: () => { setKey(''); d.close(); toast('API key removed from this browser'); } }),
+      h('button', { class: 'btn quiet', type: 'button', text: 'Copy a prompt instead', onclick: () => { d.close(); openPolishManual(); } })),
+  ], [
+    ['Cancel', () => { if (ctrl) ctrl.abort(); return true; }],
+    ['Rewrite the steps', async () => {
+      if (ctrl) return false;
+      store(MODEL_STORE, sel.value);
+      ctrl = new AbortController();
+      const t0 = Date.now(), tick = setInterval(() => { status.textContent = 'Claude is writing\u2026 ' + Math.round((Date.now() - t0) / 1000) + ' s'; }, 500);
+      status.textContent = 'Claude is writing\u2026';
+      d.box.querySelectorAll('.foot .primary').forEach((b) => { b.disabled = true; });
+      try {
+        const text = await askClaude(polishPrompt(withPics.checked), withPics.checked ? steps.map((s) => s.pic) : [], sel.value, ctrl.signal);
+        const items = parseNumbered(text, steps.length);
+        if (!items.length) throw new Error('Claude\u2019s answer didn\u2019t contain a numbered list. Try again.');
+        remember();
+        for (const [n, t] of items) app.project.steps[n - 1].text = t;
+        renderDoc(); changed();
+        const missing = steps.length - items.length;
+        toast('Claude rewrote ' + items.length + ' step' + (items.length === 1 ? '' : 's') + (missing > 0 ? '. ' + missing + ' kept their wording.' : ''), { label: 'Undo', run: undo });
+        return true;
+      } catch (err) {
+        if (err.name === 'AbortError') return true;
+        status.textContent = err.message;
+        if (err.badKey) { setKey(''); }
+        return false;
+      } finally {
+        clearInterval(tick); ctrl = null;
+        d.box.querySelectorAll('.foot .primary').forEach((b) => { b.disabled = false; });
+      }
+    }, true],
+  ]);
+}
+
+/* ---------------- export ---------------- */
+async function exportHtml(withTranscript) {
+  const p = app.project;
+  toast('Preparing the tutorial page…');
+  const items = [];
+  for (const s of p.steps) {
+    const img = s.pic ? await renderPicture(s.pic, 1600, 0.9) : null;
+    items.push('<li>\n<p>' + (mdLite(s.text) || '&nbsp;') + '</p>' + (img ? '\n<figure><img src="' + img + '" alt="' + esc('Screenshot for: ' + plain(s.text).slice(0, 140)) + '"></figure>' : '') + '\n</li>');
+  }
+  const transcript = withTranscript && p.sentences.length
+    ? '<details>\n<summary>Transcript of the video</summary>\n' + p.sentences.map((s) => '<p><span class="t">' + fmt(s.start) + '</span> ' + esc(s.text) + '</p>').join('\n') + '\n</details>' : '';
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(p.title || 'Tutorial')}</title>
+<style>
+body{margin:0;background:#fff;color:#1f1d1a;font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:900px;margin:0 auto;padding:40px 20px 80px}
+h1{font-size:32px;line-height:1.2;margin:0 0 12px}
+.intro{font-size:18px;color:#4a453e;margin:0 0 28px}
+ol.steps{padding-left:1.4em;margin:0}
+ol.steps>li{margin:0 0 34px;padding-left:.3em}
+ol.steps>li::marker{font-weight:700}
+ol.steps p{margin:0 0 12px}
+figure{margin:0}
+figure img{display:block;max-width:100%;height:auto;border:1px solid #d9d4ca;border-radius:6px}
+details{margin-top:40px;border-top:1px solid #e0dbd0;padding-top:16px}
+summary{font-weight:700;cursor:pointer}
+details p{margin:8px 0}
+.t{font:13px ui-monospace,Menlo,monospace;color:#8a8378;margin-right:6px}
+</style>
+</head>
+<body>
+<main>
+<h1>${esc(p.title || 'Tutorial')}</h1>
+${p.intro.trim() ? '<p class="intro">' + mdLite(p.intro) + '</p>\n' : ''}<ol class="steps">
+${items.join('\n')}
+</ol>
+${transcript}
+</main>
+</body>
+</html>
+`;
+  save(new Blob([html], { type: 'text/html' }), slug(p.title) + '.html');
+  toast('Tutorial page saved to your Downloads');
+}
+function exportVtt() {
+  const p = app.project;
+  if (!p.sentences.length) { toast('There is no transcript to export'); return; }
+  const cues = [];
+  for (const s of p.sentences) {               // captions read best in pieces of about two lines
+    const words = s.text.split(/\s+/), parts = [];
+    let cur = [];
+    for (const w of words) { cur.push(w); if (cur.join(' ').length > 74) { parts.push(cur.join(' ')); cur = []; } }
+    if (cur.length) parts.push(cur.join(' '));
+    const dur = (s.end - s.start) / parts.length;
+    parts.forEach((t, k) => cues.push(fmtVtt(s.start + dur * k) + ' --> ' + fmtVtt(s.start + dur * (k + 1)) + '\n' + t));
+  }
+  save(new Blob(['WEBVTT\n\n' + cues.join('\n\n') + '\n'], { type: 'text/vtt' }), slug(p.title) + '.vtt');
+  toast('Captions saved to your Downloads');
+}
+function exportTxt() {
+  const p = app.project;
+  if (!p.sentences.length) { toast('There is no transcript to export'); return; }
+  const txt = (p.title || 'Transcript') + '\n\n' + p.sentences.map((s) => '[' + fmt(s.start) + '] ' + s.text).join('\n') + '\n';
+  save(new Blob([txt], { type: 'text/plain' }), slug(p.title) + '-transcript.txt');
+  toast('Transcript saved to your Downloads');
+}
+function exportDialog() {
+  const p = app.project;
+  const cb = h('input', { type: 'checkbox', id: 'withTx' }); cb.checked = p.sentences.length > 0; cb.disabled = !p.sentences.length;
+  dialog('Export the tutorial page', [
+    h('p', { text: 'Saves one .html file with the pictures built in. Upload it to Canvas, or open it with the Tutorial Presenter to teach from it.' }),
+    h('label', { class: 'check', for: 'withTx' }, cb, 'Add the transcript at the end, in a section students can open'),
+  ], [['Cancel', () => true], ['Export', () => { exportHtml(cb.checked); return true; }, true]]);
+}
+function saveProject() {
+  const data = serialize(false);
+  save(new Blob([JSON.stringify(data)], { type: 'application/json' }), slug(app.project.title) + '.tutorial.json');
+  toast('Project saved to your Downloads. Open it here later to keep editing.');
+}
+
+/* ---------------- wiring ---------------- */
+function readText(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); }); }
+async function init() {
+  const m = store('tb-model'); if (m) { const r = document.querySelector('input[name=model][value="' + m + '"]'); if (r) r.checked = true; }
+  const drop = $('#drop');
+  $('#videoIn').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) openRecording(f); });
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, () => drop.classList.remove('over')));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const f = [...e.dataTransfer.files].find((x) => /^video\//.test(x.type) || /\.(mov|mp4|m4v|webm)$/i.test(x.name));
+    if (f) openRecording(f); else toast('Drop a video file: .mov, .mp4 or .webm');
+  });
+  $('#openProjBtn').onclick = () => $('#projIn').click();
+  $('#projIn').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try { await loadProject(JSON.parse(await readText(f))); toast('Project opened'); } catch (err) { toast(err.message || 'That file couldn’t be opened'); }
+  });
+  $('#capBtn').onclick = () => $('#capIn').click();
+  $('#capIn').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    const caps = parseCaptions(await readText(f));
+    if (!caps.length) { toast('No captions found in that file'); return; }
+    app.captions = caps; $('#capName').textContent = 'Using ' + f.name + ' (' + caps.length + ' captions).';
+  });
+  $('#relinkIn').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    const url = URL.createObjectURL(playableBlob(f));
+    try {
+      const v = await loadVideoEl(url);
+      const want = app.project.video;
+      if (want && Math.abs(v.duration - want.duration) > 1) { toast('That video is a different length from the one this tutorial came from'); }
+      if (app.videoURL) URL.revokeObjectURL(app.videoURL);
+      app.file = f; app.videoURL = url;
+      if (!app.project.video) app.project.video = { name: f.name, size: f.size, duration: v.duration, width: v.videoWidth, height: v.videoHeight };
+      renderDoc(); renderSide();
+      toast('Recording opened. Looking for screen changes in the background…');
+      const vv = await loadVideoEl(url);
+      app.samples = await sampleFrames(vv, () => {});
+    } catch (err) { toast(err.message || 'That video couldn’t be opened'); }
+  });
+  $('#cancelBtn').onclick = () => { app.cancelled = true; toast('Cancelling…'); };
+  $('#titleIn').addEventListener('input', (e) => { app.project.title = e.target.value; changed(); });
+  $('#introIn').addEventListener('input', (e) => { app.project.intro = e.target.value; grow(e.target); changed(); });
+  $('#undoBtn').onclick = undo;
+  $('#polishBtn').onclick = openPolish;
+  $('#saveBtn').onclick = saveProject;
+  $('#newBtn').onclick = () => {
+    dialog('Start a new tutorial?', [h('p', { text: 'This closes the current tutorial. Save the project first if you want to come back to it.' })],
+      [['Save the project first', () => { saveProject(); return true; }], ['Cancel', () => true], ['Start new', () => { app.project = null; show('startView'); checkResume(); return true; }, true]]);
+  };
+  const menu = $('#exportMenu');
+  $('#exportBtn').onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; $('#exportBtn').setAttribute('aria-expanded', String(!menu.hidden)); };
+  document.addEventListener('click', () => { menu.hidden = true; $('#exportBtn').setAttribute('aria-expanded', 'false'); });
+  menu.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-export]'); if (!b) return;
+    menu.hidden = true;
+    ({ html: exportDialog, vtt: exportVtt, txt: exportTxt })[b.dataset.export]();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!app.project || $('#editView').hidden) return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); saveProject(); }
+    if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey && !/^(TEXTAREA|INPUT)$/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) { e.preventDefault(); undo(); }
+  });
+  window.addEventListener('beforeunload', (e) => { if (app.project && !$('#editView').hidden) { db.set('kv', 'last', serialize(false)); } });
+  checkResume();
+}
+async function checkResume() {
+  const last = await db.get('kv', 'last');
+  if (!last || !last.steps) { $('#resume').hidden = true; return; }
+  $('#resume').hidden = false;
+  $('#resumeText').textContent = 'Continue “' + (last.title || 'Untitled') + '”, ' + last.steps.length + ' steps, last edited ' + new Date(last.saved).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) + '.';
+  $('#resumeBtn').onclick = () => loadProject(last).catch((err) => toast(err.message));
+}
+init();

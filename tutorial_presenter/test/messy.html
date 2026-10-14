@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Messy export</title>
+<style>
+body{font:16px/1.5 Georgia,serif;margin:0;padding:0 0 200px}
+header.bar{position:fixed;top:0;left:0;right:0;height:50px;background:#035;color:#fff;z-index:10;padding:12px}
+nav ul{display:flex;gap:20px;list-style:none;margin:60px 0 0;padding:10px 30px;background:#eee}
+#content{width:960px;margin:20px auto;padding:0 20px}
+.shot{display:block;width:900px;height:700px;background:linear-gradient(135deg,#9cf,#fc9)}
+.small{width:300px;height:160px;background:#cde}
+.note{background:#ffd;padding:12px;border:1px solid #cc9}
+td,th{border:1px solid #999;padding:6px 10px}
+</style></head><body>
+<header class="bar">Fixed header</header>
+<nav><ul><li><a href="#a">Nav one</a></li><li><a href="#b">Nav two</a></li></ul></nav>
+<div id="content">
+<h1 id="title">Create a buffer analysis</h1>
+<div class="intro">Loose text directly in a div with a <a id="lnk" href="https://example.com/away">link that leaves</a> and <strong>bold words</strong>.</div>
+<p id="p1">First paragraph with some <em>inline</em> text that is long enough to wrap across the column so that zooming has something to fit. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.</p>
+<h2>Steps</h2>
+<ol id="steps">
+<li id="s1">Short step one.</li>
+<li id="s2"><p id="s2p">Step two paragraph.</p><img id="s2img" class="small" alt="small shot" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='160'%3E%3Crect width='300' height='160' fill='%23cde'/%3E%3C/svg%3E"></li>
+<li id="s3">Step three with direct text and a huge screenshot:<div class="shot" id="bigshot"></div><img id="s3img" style="width:900px;height:1400px" alt="big" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='1400'%3E%3Crect width='900' height='1400' fill='%23fc9'/%3E%3C/svg%3E"></li>
+<li id="s4">Step four has sub-steps:<ul><li id="s4a">Sub a</li><li id="s4b">Sub b</li></ul></li>
+<li id="s5"><span>Step five is only a span.</span></li>
+</ol>
+<div class="note" id="note"><p id="notep1">Note paragraph one.</p><p id="notep2">Note paragraph two.</p></div>
+<table id="tbl"><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>
+<p style="display:none" id="hidden">Hidden paragraph</p>
+<pre id="code">some preformatted text</pre>
+<p id="last">Last paragraph.</p>
+</div>
+<footer><p>Footer text</p></footer>
+</body></html>

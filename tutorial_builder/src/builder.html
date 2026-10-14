@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial Builder</title>
+<style>/*CSS*/</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><i></i>Tutorial Builder</div>
+  <div class="spacer"></div>
+  <div class="actions" id="topActions" hidden>
+    <button class="btn" id="saveBtn" type="button" title="Save a project file you can open again later (⌘S)">Save project</button>
+    <div class="menu">
+      <button class="btn primary" id="exportBtn" type="button" aria-haspopup="true" aria-expanded="false">Export</button>
+      <div class="menu-list" id="exportMenu" hidden>
+        <button type="button" data-export="html"><b>Tutorial page</b><small>An .html file with the pictures built in</small></button>
+        <button type="button" data-export="vtt"><b>Captions for the video</b><small>A .vtt file to add to the video in Canvas</small></button>
+        <button type="button" data-export="txt"><b>Transcript</b><small>A plain .txt file with times</small></button>
+      </div>
+    </div>
+    <button class="btn quiet" id="newBtn" type="button">New</button>
+  </div>
+</header>
+
+<main id="startView" class="start">
+  <h1>Turn a screen recording into a step-by-step tutorial</h1>
+  <p class="lede">Open a recording with your narration. The builder writes out what you said, splits it into steps where the screen changes, and takes a picture for each step. Then you edit it and export a tutorial page.</p>
+  <label class="drop" id="drop">
+    <strong>Drop a screen recording here</strong>
+    <span class="muted">or click to choose one. A .mov from ⌘ Shift 5 works, as do .mp4 and .webm.</span>
+    <input type="file" id="videoIn" accept="video/*,.mov,.mp4,.webm,.m4v" hidden>
+  </label>
+  <div class="choices" role="radiogroup" aria-label="Transcription">
+    <label class="choice"><input type="radio" name="model" value="accurate" checked><span><b>More accurate</b><span class="muted small">Best for GIS terms. Downloads about 80 MB the first time.</span></span></label>
+    <label class="choice"><input type="radio" name="model" value="fast"><span><b>Faster</b><span class="muted small">About twice as quick, with more mistakes. Downloads about 40 MB.</span></span></label>
+    <label class="choice"><input type="radio" name="model" value="none"><span><b>No transcript</b><span class="muted small">Steps come from screen changes only, and you write the text.</span></span></label>
+  </div>
+  <div class="resume" id="resume" hidden>
+    <span id="resumeText"></span>
+    <button class="btn" id="resumeBtn" type="button">Continue</button>
+  </div>
+  <div class="notes">
+    <p>Everything happens in this browser. Your recording is not uploaded anywhere. The speech model is downloaded once from Hugging Face and kept for next time.</p>
+    <p>Have a project file from before? <button class="btn quiet" id="openProjBtn" type="button">Open a project</button> <input type="file" id="projIn" accept=".json,application/json" hidden></p>
+    <p>Already have captions for this recording? <button class="btn quiet" id="capBtn" type="button">Add a .vtt or .srt file</button> before opening the video and the builder will use them instead of transcribing. <span id="capName"></span> <input type="file" id="capIn" accept=".vtt,.srt,text/vtt" hidden></p>
+  </div>
+</main>
+
+<main id="procView" class="proc" hidden>
+  <h2 id="procTitle">Working on your recording</h2>
+  <p class="muted" id="procSub">Keep this tab open. It runs fastest while the tab is in front, and the page may pause for a moment while it listens.</p>
+  <ol class="stages" id="stages"></ol>
+  <div id="procAlert"></div>
+  <button class="btn" id="cancelBtn" type="button">Cancel</button>
+</main>
+
+<div id="editView" hidden>
+  <div class="desk">
+    <section class="doc" aria-label="Tutorial">
+      <div class="doc-head">
+        <input class="title-in" id="titleIn" aria-label="Tutorial title" placeholder="Tutorial title">
+        <textarea class="intro-in" id="introIn" rows="2" aria-label="Introduction" placeholder="Introduction (optional). What will students make, and what do they need first?"></textarea>
+        <div class="doc-tools">
+          <span class="count" id="count"></span>
+          <button class="btn" id="polishBtn" type="button">Tidy wording with Claude</button>
+          <button class="btn quiet" id="undoBtn" type="button" disabled>Undo</button>
+        </div>
+      </div>
+      <ol class="steps" id="steps"></ol>
+      <p class="muted small" style="margin:14px 4px">Use **double asterisks** around menu and button names to make them bold.</p>
+    </section>
+    <aside class="side" aria-label="Recording">
+      <div class="side-in" id="side"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="layer"></div>
+<input type="file" id="relinkIn" accept="video/*,.mov,.mp4,.webm,.m4v" hidden>
+<script>/*JS*/</script>
+</body>
+</html>

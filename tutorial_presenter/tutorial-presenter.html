@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial Presenter</title>
+<style>
+  :root {
+    --bg: #f5f3ee; --card: #fffdf9; --ink: #1e1c19; --muted: #6a645b; --line: #e1dcd1;
+    --accent: #b84f06; --accent-bright: #ff8a1f; --on-accent: #1b1206;
+    --water: #2a78c8; --water-soft: rgba(42,120,200,.2); --key: #efebe2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --card: #1c1f25; --ink: #eceae5; --muted: #a39d93; --line: #2f333b;
+      --accent: #ffa350; --accent-bright: #ff8a1f; --on-accent: #1b1206;
+      --water: #6fb1ee; --water-soft: rgba(111,177,238,.22); --key: #2a2e36;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 56px 20px 96px; }
+  h1 { font-size: 40px; line-height: 1.1; letter-spacing: -.02em; margin: 0 0 12px; }
+  h2 { font-size: 24px; line-height: 1.25; letter-spacing: -.01em; margin: 56px 0 14px; }
+  h3 { font-size: 19px; margin: 34px 0 8px; }
+  p { margin: 0 0 14px; }
+  .lede { font-size: 20px; color: var(--muted); max-width: 40em; margin-bottom: 0; }
+  .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  ol, ul { padding-left: 1.3em; margin: 0 0 14px; }
+  li { margin: 0 0 10px; }
+  li > ul, li > ol { margin-top: 8px; }
+  kbd {
+    font: 600 .82em/1 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--key);
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 3px 6px; white-space: nowrap;
+  }
+  .setup { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+  .setup > li {
+    counter-increment: step; position: relative; padding: 18px 20px 18px 64px; margin: 0 0 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  }
+  .setup > li::before {
+    content: counter(step); position: absolute; left: 18px; top: 18px; width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 15px; color: var(--on-accent); background: var(--accent-bright);
+  }
+  .setup p:last-child { margin-bottom: 0; }
+  .drag { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 12px 0 14px; }
+  a.bookmark {
+    display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px 11px 16px; border-radius: 999px;
+    font-weight: 700; text-decoration: none; color: var(--on-accent); background: var(--accent-bright);
+    box-shadow: 0 2px 0 rgba(0,0,0,.18), 0 8px 22px rgba(255,138,31,.3); cursor: grab; user-select: none;
+  }
+  a.bookmark:active { cursor: grabbing; }
+  a.bookmark::before { content: ""; width: 0; height: 0; border-left: 10px solid currentColor; border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
+  .hint { color: var(--muted); font-size: 15px; }
+  button.plain {
+    font: inherit; font-size: 15px; font-weight: 600; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; cursor: pointer;
+  }
+  button.plain:hover { border-color: var(--muted); }
+  button.try {
+    font: inherit; font-weight: 700; color: var(--on-accent); background: var(--accent-bright);
+    border: 0; border-radius: 10px; padding: 10px 18px; cursor: pointer;
+  }
+  .keys { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; border-spacing: 0; }
+  .keys td { padding: 11px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+  .keys tr:first-child td { border-top: 0; }
+  .keys td:first-child { width: 36%; white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+  .notes li { margin-bottom: 12px; }
+  .practice {
+    margin-top: 18px; padding: 34px 34px 30px; background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+  }
+  .practice h2 { margin-top: 0; }
+  .practice figure { margin: 22px 0; }
+  .practice figcaption { color: var(--muted); font-size: 15px; margin-top: 8px; }
+  .practice svg { display: block; width: 100%; height: auto; }
+  .why { border-left: 4px solid var(--accent-bright); padding: 10px 16px; margin: 16px 0; background: var(--bg); border-radius: 0 10px 10px 0; }
+  .layers { width: 100%; border-collapse: collapse; margin: 10px 0 4px; }
+  .layers th, .layers td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .layers th { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .d-data { fill: var(--card); stroke: var(--ink); stroke-width: 1.5; }
+  .d-tool { fill: var(--accent-bright); }
+  .d-text { fill: var(--ink); font: 600 15px system-ui, -apple-system, "Segoe UI", sans-serif; text-anchor: middle; dominant-baseline: central; }
+  .d-tooltext { fill: var(--on-accent); font: 700 15px system-ui, -apple-system, "Segoe UI", sans-serif; text-anchor: middle; dominant-baseline: central; }
+  .d-arrow { stroke: var(--muted); stroke-width: 2; fill: none; }
+  .d-head { fill: var(--muted); }
+  @media (max-width: 600px) {
+    main { padding-top: 36px; }
+    h1 { font-size: 32px; }
+    .practice { padding: 22px 18px; }
+    .setup > li { padding-left: 58px; }
+    .keys td:first-child { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">For teaching from a tutorial page</p>
+  <h1>Tutorial Presenter</h1>
+  <p class="lede">Spotlight, zoom and step through any tutorial page while you teach. It runs from a bookmark, so the tutorial file stays exactly as you exported it.</p>
+
+  <h2>Set it up once</h2>
+  <ol class="setup">
+    <li>
+      <p><strong>Show your bookmarks bar.</strong> In Chrome press <kbd>⌘</kbd> <kbd>Shift</kbd> <kbd>B</kbd>. In Safari choose View, then Show Favorites Bar.</p>
+    </li>
+    <li>
+      <p><strong>Drag this button onto the bar.</strong></p>
+      <div class="drag">
+        <a class="bookmark" id="bm" href="javascript:void%20!function()%7B%22use%20strict%22%3Bvar%20e%3D%22__tutorialPresenter%22%3Bif(window%5Be%5D)window%5Be%5D.quit()%3Belse%7Bvar%20t%3Ddocument%2Co%3Dt.documentElement%2Cn%3Dt.body%3Bif(n%26%26o%26%26o.attachShadow)%7Bvar%20i%3D%7Bzoom%3A!0%2Cmax%3A2.2%7D%3Btry%7Bvar%20a%3DJSON.parse(localStorage.getItem(e)%7C%7C%22%7B%7D%22)%3B%22boolean%22%3D%3Dtypeof%20a.zoom%26%26(i.zoom%3Da.zoom)%2Ca.max%3E%3D1.2%26%26a.max%3C%3D4%26%26(i.max%3Da.max)%7Dcatch(e)%7B%7Dvar%20r%3Dwindow.matchMedia%26%26matchMedia(%22(prefers-reduced-motion%3A%20reduce)%22).matches%3F0%3A420%2Cs%3D%22%23ff8a1f%22%2Cl%3Doe(%22div%22)%3Bl.setAttribute(%22data-tutorial-presenter%22%2C%22%22)%3Bvar%20c%3Dl.style%3Bc.all%3D%22initial%22%2Cc.position%3D%22fixed%22%2Cc.left%3D%220%22%2Cc.top%3D%220%22%2Cc.width%3D%220%22%2Cc.height%3D%220%22%2Cc.zIndex%3D%222147483647%22%2Cc.pointerEvents%3D%22none%22%3Bvar%20d%3Dl.attachShadow(%7Bmode%3A%22open%22%7D)%3Bne(d%2C%5B%22*%7Bbox-sizing%3Aborder-box%7D%22%2C%22.hole%7Bposition%3Afixed%3Bleft%3A0%3Btop%3A0%3Bwidth%3A0%3Bheight%3A0%3Bborder-radius%3A10px%3Bpointer-events%3Anone%3Bopacity%3A0%3Btransition%3Aopacity%20.25s%3B%22%2C%22box-shadow%3A0%200%200%202px%20rgba(255%2C255%2C255%2C.55)%2C0%200%200%20200vmax%20rgba(9%2C12%2C18%2C.66)%7D%22%2C%22.hover%7Bposition%3Afixed%3Bleft%3A0%3Btop%3A0%3Bwidth%3A0%3Bheight%3A0%3Bborder%3A2px%20solid%20%22%2Bs%2B%22%3Bborder-radius%3A8px%3Bpointer-events%3Anone%3Bopacity%3A0%3B%22%2C%22transition%3Aopacity%20.15s%3Bbox-shadow%3A0%200%200%204px%20rgba(255%2C138%2C31%2C.22)%7D%22%2C'.ui%7Bfont%3A500%2013px%2F1.35%20system-ui%2C-apple-system%2C%22Segoe%20UI%22%2CRoboto%2Csans-serif%3Bcolor%3A%23fff%3Bletter-spacing%3A0%3Btext-align%3Aleft%7D'%2C%22.pill%7Bposition%3Afixed%3Bleft%3A14px%3Bbottom%3A14px%3Bdisplay%3Aflex%3Balign-items%3Acenter%3Bgap%3A9px%3Bpadding%3A8px%2015px%208px%2012px%3Bborder-radius%3A999px%3B%22%2C%22background%3Argba(17%2C20%2C26%2C.94)%3Bbox-shadow%3A0%206px%2022px%20rgba(0%2C0%2C0%2C.35)%3Btransition%3Aopacity%20.6s%3Bwhite-space%3Anowrap%7D%22%2C%22.pill.idle%7Bopacity%3A0%7D%22%2C%22.dot%7Bwidth%3A8px%3Bheight%3A8px%3Bborder-radius%3A50%25%3Bbackground%3A%22%2Bs%2B%22%3Bflex%3Anone%7D%22%2C%22.badge%7Bposition%3Afixed%3Bleft%3A26px%3Bbottom%3A27px%3Bwidth%3A8px%3Bheight%3A8px%3Bborder-radius%3A50%25%3Bbackground%3A%22%2Bs%2B%22%3Bopacity%3A.6%7D%22%2C%22.toast%7Bposition%3Afixed%3Bleft%3A50%25%3Bbottom%3A26px%3Btransform%3AtranslateX(-50%25)%3Bpadding%3A9px%2016px%3Bborder-radius%3A999px%3Bbackground%3Argba(17%2C20%2C26%2C.94)%3B%22%2C%22box-shadow%3A0%206px%2022px%20rgba(0%2C0%2C0%2C.35)%3Bopacity%3A0%3Btransition%3Aopacity%20.25s%3Bwhite-space%3Anowrap%7D%22%2C%22.toast.on%7Bopacity%3A1%7D%22%2C%22.help%7Bposition%3Afixed%3Bright%3A16px%3Bbottom%3A60px%3Bwidth%3A360px%3Bmax-width%3Acalc(100vw%20-%2032px)%3Bpadding%3A16px%2018px%2014px%3Bborder-radius%3A14px%3B%22%2C%22background%3Argba(17%2C20%2C26%2C.97)%3Bbox-shadow%3A0%2010px%2040px%20rgba(0%2C0%2C0%2C.45)%3Bdisplay%3Anone%7D%22%2C%22.help.on%7Bdisplay%3Ablock%7D%22%2C%22.help%20.title%7Bfont-size%3A14px%3Bfont-weight%3A700%3Bmargin%3A0%200%2010px%7D%22%2C%22.row%7Bdisplay%3Aflex%3Bgap%3A12px%3Bpadding%3A4px%200%3Bfont-weight%3A400%7D%22%2C%22.row%20.k%7Bflex%3A0%200%20132px%3Bcolor%3A%23ffb877%3Bfont-weight%3A600%7D%22%2C%22.frame%7Bposition%3Afixed%3Btop%3A14px%3Bleft%3A50%25%3Btransform%3AtranslateX(-50%25)%3Bdisplay%3Aflex%3Balign-items%3Acenter%3Bgap%3A12px%3Bpadding%3A10px%2012px%2010px%2016px%3B%22%2C%22border-radius%3A12px%3Bbackground%3Argba(17%2C20%2C26%2C.97)%3Bbox-shadow%3A0%2010px%2040px%20rgba(0%2C0%2C0%2C.45)%3Bpointer-events%3Aauto%3Bmax-width%3Acalc(100vw%20-%2028px)%7D%22%2C%22.frame%20button%7Bfont%3Ainherit%3Bfont-weight%3A600%3Bcolor%3A%23111%3Bbackground%3A%22%2Bs%2B%22%3Bborder%3A0%3Bborder-radius%3A8px%3Bpadding%3A7px%2012px%3Bcursor%3Apointer%3Bwhite-space%3Anowrap%7D%22%2C%22.frame%20button.x%7Bbackground%3Atransparent%3Bcolor%3A%23fff%3Bpadding%3A7px%208px%7D%22%2C%22.rec%7Bposition%3Afixed%3Bright%3A14px%3Bbottom%3A14px%3Bdisplay%3Aflex%3Balign-items%3Acenter%3Bgap%3A8px%3Bheight%3A34px%3Bpadding%3A0%2014px%200%2012px%3Bborder%3A0%3B%22%2C%22border-radius%3A999px%3Bbackground%3Argba(17%2C20%2C26%2C.92)%3Bbox-shadow%3A0%206px%2022px%20rgba(0%2C0%2C0%2C.3)%3Bcolor%3A%23fff%3Bfont-weight%3A600%3Bcursor%3Apointer%3B%22%2C%22pointer-events%3Aauto%3Bopacity%3A.4%3Btransition%3Aopacity%20.2s%3Bwhite-space%3Anowrap%7D%22%2C%22.rec%3Ahover%2C.rec.on%2C.rec.wait%7Bopacity%3A1%7D%22%2C%22.rec%20.r%7Bwidth%3A10px%3Bheight%3A10px%3Bborder-radius%3A50%25%3Bbackground%3A%23ff3b30%3Bflex%3Anone%7D%22%2C%22.rec.on%20.r%7Banimation%3Ablink%201.2s%20infinite%7D%22%2C%22.lvl%7Bdisplay%3Anone%3Bwidth%3A30px%3Bheight%3A5px%3Bborder-radius%3A3px%3Bbackground%3Argba(255%2C255%2C255%2C.22)%3Boverflow%3Ahidden%3Bflex%3Anone%7D%22%2C%22.rec.on%20.lvl.live%7Bdisplay%3Ablock%7D%22%2C%22.lvl%20i%7Bdisplay%3Ablock%3Bheight%3A100%25%3Bwidth%3A0%3Bbackground%3A%234cd964%3Bborder-radius%3A3px%7D%22%2C%22.card%7Bposition%3Afixed%3Bright%3A16px%3Bbottom%3A60px%3Bwidth%3A380px%3Bmax-width%3Acalc(100vw%20-%2032px)%3Bpadding%3A16px%2018px%3Bborder-radius%3A14px%3B%22%2C%22background%3Argba(17%2C20%2C26%2C.97)%3Bbox-shadow%3A0%2010px%2040px%20rgba(0%2C0%2C0%2C.45)%3Bpointer-events%3Aauto%3Bdisplay%3Anone%3Bfont-weight%3A400%7D%22%2C%22.card.on%7Bdisplay%3Ablock%7D%22%2C%22.card%20.title%7Bfont-size%3A14px%3Bfont-weight%3A700%3Bmargin%3A0%200%208px%7D%22%2C%22.card%20p%7Bmargin%3A0%200%208px%7D%22%2C%22.card%20ol%7Bmargin%3A0%200%2010px%3Bpadding-left%3A20px%7D%22%2C%22.card%20li%7Bmargin%3A0%200%204px%7D%22%2C%22.card%20b%7Bcolor%3A%23ffb877%3Bfont-weight%3A600%7D%22%2C%22.card%20.btns%7Bdisplay%3Aflex%3Bgap%3A8px%3Bjustify-content%3Aflex-end%3Bmargin-top%3A12px%7D%22%2C%22.card%20button%7Bfont%3Ainherit%3Bfont-weight%3A600%3Bborder%3A0%3Bborder-radius%3A8px%3Bpadding%3A7px%2012px%3Bcursor%3Apointer%3Bcolor%3A%23111%3Bbackground%3A%22%2Bs%2B%22%7D%22%2C%22.card%20button.ghost%7Bbackground%3Atransparent%3Bcolor%3A%23fff%3Bbox-shadow%3Ainset%200%200%200%201px%20rgba(255%2C255%2C255%2C.3)%7D%22%2C%22%40keyframes%20blink%7B50%25%7Bopacity%3A.25%7D%7D%22%5D.join(%22%22))%3Bvar%20p%3Doe(%22div%22%2C%22hole%22)%2Cu%3Doe(%22div%22%2C%22hover%22)%2Ch%3Doe(%22div%22%2C%22badge%22)%2Cf%3Doe(%22div%22%2C%22ui%20pill%22)%3Bf.appendChild(oe(%22span%22%2C%22dot%22))%2Cf.appendChild(oe(%22span%22%2Cnull%2C%22Presenting%20%E2%80%94%20click%20anything%20to%20spotlight%20it%20%C2%B7%20%E2%86%90%20%E2%86%92%20to%20step%20%C2%B7%20R%20to%20record%20%C2%B7%20%3F%20for%20keys%22))%3Bvar%20g%3Doe(%22div%22%2C%22ui%20toast%22)%2Cm%3Doe(%22button%22%2C%22ui%20rec%22)%3Bm.type%3D%22button%22%2Cm.title%3D%22Record%20a%20video%20of%20this%20tab%20(R)%22%3Bvar%20v%3Doe(%22span%22%2C%22r%22)%2Cb%3Doe(%22span%22%2Cnull%2C%22Record%22)%2Cx%3Doe(%22span%22%2C%22lvl%22)%2Cw%3Doe(%22i%22)%3Bx.appendChild(w)%2Cm.appendChild(v)%2Cm.appendChild(x)%2Cm.appendChild(b)%3Bvar%20y%3Doe(%22div%22%2C%22ui%20card%22)%2Ck%3Doe(%22div%22%2C%22ui%20help%22)%3Bk.appendChild(oe(%22div%22%2C%22title%22%2C%22Tutorial%20Presenter%22))%2C%5B%5B%22Click%22%2C%22Spotlight%20and%20zoom%20in%20on%20a%20step%20or%20picture%22%5D%2C%5B%22Click%20it%20again%22%2C%22Widen%20to%20the%20block%20around%20it%22%5D%2C%5B%22%E2%86%92%20%20or%20%20Space%22%2C%22Next%20item%22%5D%2C%5B%22%E2%86%90%22%2C%22Previous%20item%22%5D%2C%5B%22Drag%20across%20words%22%2C%22Highlight%20them%22%5D%2C%5B%22U%20%20%2F%20%20C%22%2C%22Undo%20last%20highlight%20%2F%20clear%20them%20all%22%5D%2C%5B%22Z%22%2C%22Zoom%20on%20or%20off%20(spotlight%20only)%22%5D%2C%5B%22%2B%20%20%2F%20%20%E2%88%92%22%2C%22Zoom%20in%20more%20%2F%20less%22%5D%2C%5B%22Esc%22%2C%22Back%20to%20the%20whole%20page%22%5D%2C%5B%22%E2%8C%98-click%20or%20Ctrl-click%22%2C%22Use%20a%20link%20normally%22%5D%2C%5B%22R%22%2C%22Start%20or%20stop%20a%20video%20recording%22%5D%2C%5B%22M%22%2C%22Mute%20or%20unmute%20your%20microphone%20while%20recording%22%5D%2C%5B%22Q%22%2C%22Quit%20(or%20click%20the%20bookmark%20again)%22%5D%5D.forEach((function(e)%7Bvar%20t%3Doe(%22div%22%2C%22row%22)%3Bt.appendChild(oe(%22span%22%2C%22k%22%2Ce%5B0%5D))%2Ct.appendChild(oe(%22span%22%2Cnull%2Ce%5B1%5D))%2Ck.appendChild(t)%7D))%2C%5Bp%2Cu%2Ch%2Cf%2Cg%2Ck%2Cm%2Cy%5D.forEach((function(e)%7Bd.appendChild(e)%7D))%2Co.appendChild(l)%3Bvar%20C%3Dne(t%2C%22%3A%3Ahighlight(tutorial-presenter)%7Bbackground-color%3A%23ffe24a%3Bcolor%3A%23111%7D%22)%2CS%3D0%2CT%3D0%2CE%3D%2F%5E(IMG%7CVIDEO%7CCANVAS%7CPICTURE%7CIFRAME)%24%2F%2CR%3D%2F%5E(P%7CH%5B1-6%5D%7CIMG%7CPRE%7CVIDEO%7CCANVAS%7CPICTURE%7CIFRAME%7CDT%7CFIGCAPTION%7CSUMMARY%7CTR%7CCAPTION)%24%2F%2CM%3D%2F%5E(LI%7CFIGURE%7CBLOCKQUOTE%7CTABLE%7CDD)%24%2F%2CL%3D%2F%5E(SCRIPT%7CSTYLE%7CNOSCRIPT%7CTEMPLATE%7CNAV%7CFOOTER%7CHEAD%7CBR%7CHR%7CSELECT%7COPTION%7CINPUT%7CBUTTON%7CTEXTAREA%7CLINK%7CMETA)%24%2F%2CA%3Dt.createRange()%2CI%3D%7Btx%3A0%2Cty%3A0%2Cs%3A1%7D%2CP%3Dnull%2CN%3Dnull%2CD%3Dnull%2CO%3Dnull%2CB%3D%5B%5D%2Cz%3D0%2CU%3D0%2CH%3D0%2CF%3Dn.style%2CV%3D%7Btransform%3AF.transform%2Corigin%3AF.transformOrigin%2Ctransition%3AF.transition%2CoverflowX%3Ao.style.overflowX%7D%2CW%3Dnull%2CX%3D%5B%5D%2Cq%3Dnull%2CK%3D0%2C%24%3D0%2CZ%3D!1%2CY%3D0%2CG%3D0%2C_%3D!1%2Cj%3D%5B%5B%22mousemove%22%2Cfunction(e)%7Bif(ae(e))q%3Dnull%3Belse%7Bvar%20t%3Due(e.target)%3Bq%3Dt%26%26t!%3D%3DP%3Ft%3Anull%2CK%3Dperformance.now()%7D%7D%5D%2C%5B%22pointerdown%22%2CSe%5D%2C%5B%22mousedown%22%2CSe%5D%2C%5B%22pointerup%22%2CTe%5D%2C%5B%22mouseup%22%2CTe%5D%2C%5B%22click%22%2Cfunction(e)%7Bif(!Ce(e)%26%26(e.preventDefault()%2Ce.stopPropagation()%2C0%3D%3D%3De.button))if(_)_%3D!1%3Belse%20if(!(e.detail%3E1))%7Bvar%20t%3Due(e.target)%3Bt%3Ft%3D%3D%3DP%3Fbe()%3Ame(t)%3Ave()%7D%7D%5D%2C%5B%22dblclick%22%2CEe%5D%2C%5B%22auxclick%22%2CEe%5D%2C%5B%22keydown%22%2Cfunction(e)%7Bif(!(e.metaKey%7C%7Ce.ctrlKey%7C%7Ce.altKey))%7Bvar%20t%3De.target%3Bif(!t%7C%7C1!%3D%3Dt.nodeType%7C%7Cae(e)%7C%7C!t.isContentEditable%26%26!%2F%5E(INPUT%7CTEXTAREA%7CSELECT)%24%2F.test(t.tagName))%7Bvar%20o%2Cn%3D!0%3Bswitch(e.key)%7Bcase%22ArrowRight%22%3Acase%22PageDown%22%3Acase%22Enter%22%3Axe(1)%3Bbreak%3Bcase%22%20%22%3Axe(e.shiftKey%3F-1%3A1)%3Bbreak%3Bcase%22ArrowLeft%22%3Acase%22PageUp%22%3Axe(-1)%3Bbreak%3Bcase%22Escape%22%3Ay.classList.contains(%22on%22)%3Fy.classList.remove(%22on%22)%3Ak.classList.contains(%22on%22)%3Fk.classList.remove(%22on%22)%3Ave()%3Bbreak%3Bcase%22z%22%3Acase%22Z%22%3Ai.zoom%3D!i.zoom%2Cte()%2Cie(i.zoom%3F%22Zoom%20on%22%3A%22Zoom%20off%20%E2%80%94%20spotlight%20only%22)%2CP%26%26(N%3Dnull%2Cfe(!0))%3Bbreak%3Bcase%22%2B%22%3Acase%22%3D%22%3Acase%22-%22%3Acase%22_%22%3Ai.max%3DMath.round(10*Math.max(1.2%2CMath.min(4%2Ci.max%2B(%22-%22%3D%3D%3De.key%7C%7C%22_%22%3D%3D%3De.key%3F-.3%3A.3))))%2F10%2Ci.zoom%3D!0%2Cte()%2Cie(%22Zoom%20up%20to%20%22%2Bi.max%2B%22%C3%97%22)%2CP%26%26(N%3Dnull%2Cfe(!0))%3Bbreak%3Bcase%22w%22%3Acase%22W%22%3Abe()%3Bbreak%3Bcase%22n%22%3Acase%22N%22%3A(o%3DB.pop())%26%26o.isConnected%26%26me(o%2C!0)%3Bbreak%3Bcase%22u%22%3Acase%22U%22%3Acase%22Backspace%22%3Awe(!1)%3Bbreak%3Bcase%22c%22%3Acase%22C%22%3Awe(!0)%3Bbreak%3Bcase%22%3F%22%3Acase%22%2F%22%3Acase%22h%22%3Acase%22H%22%3Ak.classList.toggle(%22on%22)%3Bbreak%3Bcase%22r%22%3Acase%22R%22%3AQ%3FPe()%3Ay.classList.contains(%22on%22)%3F(y.classList.remove(%22on%22)%2CIe())%3AAe()%3Bbreak%3Bcase%22m%22%3Acase%22M%22%3AQ%26%26Q.mic%26%26(Q.muted%3D!Q.muted%2CQ.streams%5B1%5D.getAudioTracks().forEach((function(e)%7Be.enabled%3D!Q.muted%7D))%2Cie(Q.muted%3F%22Microphone%20off%22%3A%22Microphone%20on%22)%2CRe())%3Bbreak%3Bcase%22q%22%3Acase%22Q%22%3ADe()%3Bbreak%3Bdefault%3An%3D!1%7Dn%26%26(e.preventDefault()%2Ce.stopPropagation())%7D%7D%7D%5D%2C%5B%22resize%22%2Cfunction()%7BP%26%26(N%3Dnull%2Cfe(!1))%7D%5D%5D%3Bj.forEach((function(e)%7Bwindow.addEventListener(e%5B0%5D%2Ce%5B1%5D%2C!0)%7D))%2Cfunction()%7Bvar%20e%3DinnerWidth%2Co%3DinnerHeight%2Cn%3Dnull%2Ci%3D0%3Bif(Array.prototype.forEach.call(t.querySelectorAll(%22iframe%22)%2C(function(t)%7Bvar%20a%3Dt.getBoundingClientRect()%2Cr%3DMath.max(0%2CMath.min(a.right%2Ce)-Math.max(a.left%2C0))*Math.max(0%2CMath.min(a.bottom%2Co)-Math.max(a.top%2C0))%3Br%3Ei%26%26(i%3Dr%2Cn%3Dt)%7D))%2Cn%26%26!(i%3C.35*e*o)%26%26%2F%5E(https%3F%7Cfile)%3A%2F.test(n.src%7C%7C%22%22))%7Bvar%20a%3Doe(%22div%22%2C%22ui%20frame%22)%3Ba.appendChild(oe(%22span%22%2Cnull%2C%22This%20page%20shows%20the%20tutorial%20inside%20a%20frame%20the%20presenter%20can%E2%80%99t%20reach.%22))%3Bvar%20r%3Doe(%22button%22%2Cnull%2C%22Open%20it%20in%20its%20own%20tab%22)%3Br.addEventListener(%22click%22%2C(function()%7Bwindow.open(n.src%2C%22_blank%22)%2Ca.remove()%2Cie(%22In%20the%20new%20tab%2C%20click%20the%20bookmark%20again%22)%7D))%3Bvar%20s%3Doe(%22button%22%2C%22x%22%2C%22%E2%9C%95%22)%3Bs.setAttribute(%22aria-label%22%2C%22Dismiss%22)%2Cs.addEventListener(%22click%22%2C(function()%7Ba.remove()%7D))%2Ca.appendChild(r)%2Ca.appendChild(s)%2Cd.appendChild(a)%7D%7D()%3Bvar%20Q%3Dnull%2CJ%3D!1%2Cee%3D!0%3Bm.addEventListener(%22click%22%2C(function()%7BQ%3FPe()%3Ay.classList.contains(%22on%22)%3Fy.classList.remove(%22on%22)%3AAe()%7D))%2Cwindow%5Be%5D%3D%7Bquit%3ADe%2Cversion%3A%221.0%22%2Ccurrent%3Afunction()%7Breturn%20P%7D%7D%2C%24%3DrequestAnimationFrame((function%20e(t)%7B%24%3DrequestAnimationFrame(e)%2CQ%26%26function()%7Bvar%20e%3DQ%3Bif(e%26%26e.an)%7Be.an.getFloatTimeDomainData(e.buf)%3Bfor(var%20t%3D0%2Co%3D0%3Bo%3Ce.buf.length%3Bo%2B%2B)t%2B%3De.buf%5Bo%5D*e.buf%5Bo%5D%3Bvar%20n%3D10*Math.log10(t%2Fe.buf.length%2B1e-12)%2Ci%3DMath.max(0%2CMath.min(1%2C(n%2B60)%2F45))%3Be.muted%7C%7C(e.peak%3DMath.max(e.peak%2Ci))%2Cw.style.width%3DMath.round(100*(e.muted%3F0%3Ai))%2B%22%25%22%7D%7D()%3Bvar%20o%3DP%7C%7CD%3Bif(o)if(o.isConnected)%7Bvar%20n%3Dye(o)%3Bif(P%26%26N%26%26N.isConnected%26%26r)%7Bvar%20i%3DMath.min(1%2C(t-z)%2Fr)%3Bif(i%3C1)%7Bvar%20a%3D1-Math.pow(1-i%2C3)%2Cs%3Dye(N)%3Bn%3D%7Bx%3As.x%2B(n.x-s.x)*a%2Cy%3As.y%2B(n.y-s.y)*a%2Cw%3As.w%2B(n.w-s.w)*a%2Ch%3As.h%2B(n.h-s.h)*a%7D%7Delse%20N%3Dnull%7Dke(p%2Cn)%7Delse%20P%26%26ve()%2CD%3Dnull%3Bif(q%26%26q.isConnected%26%26!Z%26%26t-K%3C1600)%7Bvar%20l%3Dpe(q)%3Bke(u%2C%7Bx%3Al.left-4%2Cy%3Al.top-4%2Cw%3Al.right-l.left%2B8%2Ch%3Al.bottom-l.top%2B8%7D)%2Cu.style.opacity%3D%221%22%7Delse%20u.style.opacity%3D%220%22%7D))%2Cf.classList.remove(%22idle%22)%2CclearTimeout(T)%2CT%3DsetTimeout((function()%7Bf.classList.add(%22idle%22)%7D)%2C6e3)%7D%7Dfunction%20te()%7Btry%7BlocalStorage.setItem(e%2CJSON.stringify(i))%7Dcatch(e)%7B%7D%7Dfunction%20oe(e%2Co%2Cn)%7Bvar%20i%3Dt.createElement(e)%3Breturn%20o%26%26(i.className%3Do)%2Cnull!%3Dn%26%26(i.textContent%3Dn)%2Ci%7Dfunction%20ne(e%2Cn)%7Btry%7Bvar%20i%3Dnew%20CSSStyleSheet%3Breturn%20i.replaceSync(n)%2Ce.adoptedStyleSheets%3DArray.prototype.concat.call(e.adoptedStyleSheets%7C%7C%5B%5D%2Ci)%2Cfunction()%7Be.adoptedStyleSheets%3DArray.prototype.filter.call(e.adoptedStyleSheets%2C(function(e)%7Breturn%20e!%3D%3Di%7D))%7D%7Dcatch(i)%7Bvar%20a%3Doe(%22style%22%2Cnull%2Cn)%3Breturn(e%3D%3D%3Dt%3Ft.head%7C%7Co%3Ae).appendChild(a)%2Cfunction()%7Ba.remove()%7D%7D%7Dfunction%20ie(e)%7Bg.textContent%3De%2Cg.classList.add(%22on%22)%2CclearTimeout(S)%2CS%3DsetTimeout((function()%7Bg.classList.remove(%22on%22)%7D)%2C1700)%7Dfunction%20ae(e)%7Breturn%20e.composedPath%3Fe.composedPath().indexOf(l)%3E%3D0%3Ae.target%3D%3D%3Dl%7Dfunction%20re(e)%7Breturn%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3D%3D%3De.namespaceURI%7Dfunction%20se(e)%7Bvar%20t%3DgetComputedStyle(e).display%3Breturn%22inline%22%3D%3D%3Dt%7C%7C%22contents%22%3D%3D%3Dt%7Dfunction%20le(e)%7Bif(e.checkVisibility)%7Bif(!e.checkVisibility(%7BcheckOpacity%3A!0%2CcheckVisibilityCSS%3A!0%7D))return!1%7Delse%20if(!e.getClientRects().length)return!1%3Bvar%20t%3De.getBoundingClientRect()%3Breturn%20t.width%3E3%26%26t.height%3E3%7Dfunction%20ce(e)%7Breturn%20e.offsetHeight%7C%7Ce.getBoundingClientRect().height%2F(I.s%7C%7C1)%7Dfunction%20de(e)%7Bfor(var%20t%3De.firstChild%3Bt%3Bt%3Dt.nextSibling)if(3%3D%3D%3Dt.nodeType%26%26%2F%5CS%2F.test(t.nodeValue))return!0%3Breturn!1%7Dfunction%20pe(e)%7Bvar%20t%3De.getBoundingClientRect()%2Co%3D%7Bleft%3At.left%2Ctop%3At.top%2Cright%3At.right%2Cbottom%3At.bottom%7D%3Bif(re(e)%7C%7CE.test(e.tagName))return%20o%3Bvar%20n%3DgetComputedStyle(e)%3Bif(%22none%22%3D%3D%3Dn.backgroundImage%26%26%22none%22%3D%3D%3Dn.boxShadow%26%26%2F%5E(transparent%7Crgba%5C(.*%2C%5Cs*0%5C))%24%2F.test(n.backgroundColor)%26%26!(parseFloat(n.borderTopWidth)%2BparseFloat(n.borderRightWidth)%2BparseFloat(n.borderBottomWidth)%2BparseFloat(n.borderLeftWidth)%3E0))%7BA.selectNodeContents(e)%3Bvar%20i%3DA.getBoundingClientRect()%3Bi.width%3E1%26%26i.height%3E1%26%26(o.left%3DMath.max(o.left%2Ci.left)%2Co.right%3DMath.min(o.right%2Ci.right)%2Co.top%3DMath.max(o.top%2Ci.top)%2Co.bottom%3DMath.min(o.bottom%2Ci.bottom))%7Dif(%22list-item%22%3D%3D%3Dn.display%26%26%22none%22!%3D%3Dn.listStyleType%26%26%22inside%22!%3D%3Dn.listStylePosition)%7Bvar%20a%3D2*parseFloat(n.fontSize)*(e.offsetWidth%3Ft.width%2Fe.offsetWidth%3A1)%3B%22rtl%22%3D%3D%3Dn.direction%3Fo.right%2B%3Da%3Ao.left-%3Da%7Dreturn%20o%7Dfunction%20ue(e)%7Bif(!e%7C%7C1!%3D%3De.nodeType%7C%7Ce%3D%3D%3Dn%7C%7Ce%3D%3D%3Do)return%20null%3Bvar%20t%3De%3Bif(re(t))t%3Dfunction(e)%7Bfor(var%20t%3Dnull%2Co%3De%3Bo%26%261%3D%3D%3Do.nodeType%3Bo%3Do.parentElement)re(o)%26%26%22svg%22%3D%3D%3Do.localName%26%26(t%3Do)%3Breturn%20t%7D(t)%7C%7Ct%3Belse%20if(!E.test(t.tagName))for(%3Bt%26%26t!%3D%3Dn%26%26se(t)%3B)t%3Dt.parentElement%3Breturn%20t%26%26t!%3D%3Dn%26%26t!%3D%3Do%3Fce(t)%3E1.5*innerHeight%26%26t.children.length%3E1%3Fnull%3At%3Anull%7Dfunction%20he(e)%7Breturn%22translate(%22%2Be.tx%2B%22px%2C%22%2Be.ty%2B%22px)%20scale(%22%2Be.s%2B%22)%22%7Dfunction%20fe(e)%7Bvar%20t%3Dfunction()%7Bvar%20e%3DgetComputedStyle(n).transform%2Ct%3De%26%26e.match(%2Fmatrix%5C((%5B%5E)%5D%2B)%5C)%2F)%3Bif(!t)return%7Btx%3A0%2Cty%3A0%2Cs%3A1%7D%3Bvar%20o%3Dt%5B1%5D.split(%22%2C%22).map(parseFloat)%3Breturn%7Bs%3Ao%5B0%5D%2Ctx%3Ao%5B4%5D%2Cty%3Ao%5B5%5D%7D%7D()%3BF.transition%3D%22none%22%2CF.transformOrigin%3D%220%200%22%2CF.transform%3D%22none%22%3Bvar%20a%3Dn.getBoundingClientRect()%3Bif(P)try%7BP.scrollIntoView(%7Bblock%3A%22center%22%2Cinline%3A%22nearest%22%2Cbehavior%3A%22instant%22%7D)%7Dcatch(e)%7BP.scrollIntoView()%7Dvar%20s%3Dn.getBoundingClientRect()%2Cl%3D%7Btx%3A0%2Cty%3A0%2Cs%3A1%7D%3Bif(P%26%26i.zoom)%7Bvar%20c%3Dpe(P)%2Cd%3Dc.right-c.left%2Cp%3Dc.bottom-c.top%2Cu%3Do.clientWidth%7C%7CinnerWidth%2Ch%3DinnerHeight%2Cf%3DMath.max(36%2C.05*u)%2Cg%3DMath.max(36%2C.07*h)%2Cm%3Dre(P)%7C%7CE.test(P.tagName)%2Cv%3DMath.min(i.max%2C(u-2*f)%2Fd%2C(h-2*g)%2Fp)%2Cb%3Dd*(v%3DMath.max(m%3F.5%3A1%2Cv))%2Cx%3Dp*v%2Cw%3Dx%3C%3Dh-2*g%3F(h-x)%2F2%3Ag%3Bl%3D%7Bs%3Av%2Ctx%3A(b%3C%3Du-2*f%3F(u-b)%2F2%3Af)-s.left-v*(c.left-s.left)%2Cty%3Aw-s.top-v*(c.top-s.top)%7D%7DF.transform%3Dhe(%7Btx%3At.tx%2B(a.left-s.left)%2Cty%3At.ty%2B(a.top-s.top)%2Cs%3At.s%7D)%2C1%3D%3D%3Dl.s%26%261%3D%3D%3Dt.s%7C%7C(o.style.overflowX%3D%22hidden%22)%2Cn.offsetWidth%2Ce%26%26r%26%26(F.transition%3D%22transform%20%22%2Br%2B%22ms%20cubic-bezier(.3%2C.7%2C.2%2C1)%22)%2CF.transform%3Dhe(l)%2CI%3Dl%2CclearTimeout(U)%2CU%3DsetTimeout(ge%2Ce%3Fr%2B60%3A0)%7Dfunction%20ge()%7B1!%3D%3DI.s%7C%7CI.tx%7C%7CI.ty%7C%7C(F.transition%3D%22none%22%2CF.transform%3D%22none%22%2Co.style.overflowX%3DV.overflowX)%7Dfunction%20me(e%2Ct)%7Be%26%26e.isConnected%26%26(t%7C%7C(B%3D%5B%5D)%2CN%3DP%26%26P.isConnected%3FP%3Anull%2Cz%3Dperformance.now()%2CP%3DO%3De%2CD%3Dnull%2Cq%3Dnull%2Cfe(!0)%2Cp.style.opacity%3D%221%22)%7Dfunction%20ve()%7BP%26%26(O%3DP%2CD%3DP%2CP%3Dnull%2CN%3Dnull%2CB%3D%5B%5D%2Cp.style.opacity%3D%220%22%2CclearTimeout(H)%2CH%3DsetTimeout((function()%7BD%3Dnull%7D)%2Cr%2B80)%2Cfe(!0))%7Dfunction%20be()%7Bif(P)%7Bfor(var%20e%2Ct%2Ci%3DP.getBoundingClientRect()%2Ca%3DP.parentElement%3Ba%26%26a!%3D%3Dn%26%26a!%3D%3Do%3B)%7Bvar%20r%3Da.getBoundingClientRect()%3Bif(r.width%3E3%26%26r.height%3E3%26%26(e%3Dr%2Ct%3Di%2C!(Math.abs(e.width-t.width)%3C5%26%26Math.abs(e.height-t.height)%3C5)))break%3Ba%3Da.parentElement%7Dif(!a%7C%7Ca%3D%3D%3Dn%7C%7Ca%3D%3D%3Do%7C%7Cce(a)%3E3*innerHeight)ie(%22That%20is%20as%20wide%20as%20it%20goes%22)%3Belse%7Bvar%20s%3DP%3BB.push(s)%2Cme(a%2C!0)%7D%7D%7Dfunction%20xe(e)%7Bvar%20t%2Co%2Ci%3D(t%3D%5B%5D%2Co%3DinnerHeight%2Cfunction%20e(n)%7Bfor(var%20i%3Dn.firstElementChild%3Bi%3Bi%3Di.nextElementSibling)if(i!%3D%3Dl)if(re(i))le(i)%26%26t.push(i)%3Belse%7Bvar%20a%3Di.tagName%3Bif(!L.test(a)%26%26le(i))%7Bvar%20r%3DgetComputedStyle(i)%3Bif(%22fixed%22!%3D%3Dr.position%26%26%22sticky%22!%3D%3Dr.position)if(R.test(a))t.push(i)%3Belse%20if(%22inline%22!%3D%3Dr.display%26%26%22contents%22!%3D%3Dr.display)%7Bvar%20s%3Dde(i)%2Cc%3Dce(i)%2Cd%3D%22TABLE%22!%3D%3Da%26%26i.querySelector(%22ol%2Cul%2Ctable%22)%2Cp%3D!d%26%26c%3C%3D.45*o%26%26(%22none%22!%3D%3Dr.backgroundImage%7C%7C!%2F%5E(transparent%7Crgba%5C(.*%2C%5Cs*0%5C))%24%2F.test(r.backgroundColor))%3Bif(M.test(a)%7C%7Cs%7C%7Cp)%7Bif(p%7C%7Cc%3C%3D.8*o%26%26!d)%7Bt.push(i)%3Bcontinue%7Ds%26%26t.push(i)%7De(i)%7Delse%20i.querySelector(%22img%2Csvg%2Cvideo%2Ccanvas%2Cpicture%22)%26%26e(i)%7D%7D%7D(n)%2Ct)%3Bif(i.length)%7Bvar%20a%2Cr%2Cs%3DP%7C%7C(O%26%26O.isConnected%26%26(a%3DO.getBoundingClientRect()).bottom%3E0%26%26a.top%3CinnerHeight%3FO%3Anull)%2Cc%3D-1%3Bif(s)%7Bvar%20d%3Di.indexOf(s)%3Bif(d%3E%3D0)c%3Dd%2Be%3Belse%20if(e%3E0)%7Bfor(r%3D0%3Br%3Ci.length%3Br%2B%2B)if(4%26s.compareDocumentPosition(i%5Br%5D)%26%26!s.contains(i%5Br%5D))%7Bc%3Dr%3Bbreak%7Dc%3C0%26%26(c%3Di.length)%7Delse%20for(r%3Di.length-1%3Br%3E%3D0%3Br--)if(2%26s.compareDocumentPosition(i%5Br%5D)%26%26!i%5Br%5D.contains(s))%7Bc%3Dr%3Bbreak%7D%7Delse%20if(e%3E0)%7Bfor(r%3D0%3Br%3Ci.length%3Br%2B%2B)if(i%5Br%5D.getBoundingClientRect().top%3E%3D-2)%7Bc%3Dr%3Bbreak%7Dc%3C0%26%26(c%3Di.length)%7Delse%20for(r%3Di.length-1%3Br%3E%3D0%3Br--)if(i%5Br%5D.getBoundingClientRect().bottom%3C%3DinnerHeight%2B2)%7Bc%3Dr%3Bbreak%7Dc%3C0%3Fie(%22Start%20of%20the%20page%22)%3Ac%3E%3Di.length%3Fie(%22End%20of%20the%20page%22)%3Ame(i%5Bc%5D)%7Delse%20ie(%22Nothing%20to%20step%20through%20on%20this%20page%22)%7Dfunction%20we(e)%7BW%26%26X.length%26%26(e%3F(X.forEach((function(e)%7BW.delete(e)%7D))%2CX%3D%5B%5D%2Cie(%22Highlights%20cleared%22))%3AW.delete(X.pop()))%7Dfunction%20ye(e)%7Bvar%20t%3Dpe(e)%3Breturn%7Bx%3At.left-8%2Cy%3At.top-8%2Cw%3At.right-t.left%2B16%2Ch%3At.bottom-t.top%2B16%7D%7Dfunction%20ke(e%2Ct)%7Bvar%20o%3De.style%3Bo.transform%3D%22translate(%22%2Bt.x%2B%22px%2C%22%2Bt.y%2B%22px)%22%2Co.width%3Dt.w%2B%22px%22%2Co.height%3Dt.h%2B%22px%22%7Dfunction%20Ce(e)%7Breturn%20ae(e)%7C%7Ce.metaKey%7C%7Ce.ctrlKey%7Dfunction%20Se(e)%7BCe(e)%7C%7C(e.stopPropagation()%2C%22mousedown%22%3D%3D%3De.type%26%260%3D%3D%3De.button%26%26(Z%3D!0%2C_%3D!1%2CY%3De.clientX%2CG%3De.clientY))%7Dfunction%20Te(e)%7Bif(!Ce(e)%26%26(e.stopPropagation()%2C%22mouseup%22%3D%3D%3De.type%26%26Z%26%26(Z%3D!1%2C!(Math.abs(e.clientX-Y)%2BMath.abs(e.clientY-G)%3C6))))%7B_%3D!0%3Bvar%20t%2Co%3Dwindow.getSelection%26%26getSelection()%3Bo%26%26!o.isCollapsed%26%26o.rangeCount%26%26(t%3Do.getRangeAt(0).cloneRange()%2Cwindow.CSS%26%26CSS.highlights%26%26window.Highlight%3F(W%7C%7C(W%3Dnew%20Highlight%2CCSS.highlights.set(%22tutorial-presenter%22%2CW))%2CW.add(t)%2CX.push(t))%3Aie(%22Highlighting%20needs%20a%20newer%20browser%22)%2Co.removeAllRanges())%7D%7Dfunction%20Ee(e)%7BCe(e)%7C%7Ce.stopPropagation()%7Dfunction%20Re()%7Bif(m.classList.toggle(%22on%22%2C!!Q)%2Cm.classList.toggle(%22wait%22%2CJ)%2CQ)%7Bvar%20e%3DMath.floor((Date.now()-Q.t0)%2F1e3)%3Bb.textContent%3DMath.floor(e%2F60)%2B%22%3A%22%2B(%220%22%2Be%2560).slice(-2)%2B(Q.mic%3FQ.muted%3F%22%20%C2%B7%20mic%20off%22%3A%22%22%3A%22%20%C2%B7%20no%20sound%22)%2B%22%20%C2%B7%20Stop%22%7Delse%20b.textContent%3DJ%3F%22Choose%20what%20to%20record%E2%80%A6%22%3A%22Record%22%7Dfunction%20Me(e)%7Be.forEach((function(e)%7Be%26%26e.getTracks().forEach((function(e)%7Be.stop()%7D))%7D))%7Dfunction%20Le(e)%7Be.preventDefault()%2Ce.returnValue%3D%22%22%7Dfunction%20Ae()%7BQ%7C%7CJ%7C%7C(navigator.mediaDevices%26%26navigator.mediaDevices.getDisplayMedia%26%26window.MediaRecorder%3F%5B%22video%2Fmp4%3Bcodecs%3Davc1%2Cmp4a.40.2%22%2C%22video%2Fmp4%3Bcodecs%3Davc1%22%5D.some((function(e)%7Breturn%20MediaRecorder.isTypeSupported(e)%7D))%3FIe()%3Afunction()%7Bfor(%3By.firstChild%3B)y.firstChild.remove()%3By.appendChild(oe(%22div%22%2C%22title%22%2C%22Recording%20in%20this%20browser%22))%2Cy.appendChild(oe(%22p%22%2Cnull%2C%22This%20browser%20can%20only%20save%20WebM%20videos%2C%20and%20Canvas%20won%E2%80%99t%20accept%20those.%20Your%20Mac%E2%80%99s%20own%20recorder%20works%20with%20the%20presenter%20and%20saves%20a%20file%20Canvas%20takes%3A%22))%3Bvar%20e%3Doe(%22ol%22)%3B%5B%5B%22Press%20%22%2C%22%E2%8C%98%20Shift%205%22%2C%22.%22%5D%2C%5B%22Choose%20%22%2C%22Record%20Entire%20Screen%22%2C%22%20or%20Record%20Selected%20Portion.%22%5D%2C%5B%22Open%20%22%2C%22Options%22%2C%22%20and%20pick%20your%20microphone.%20It%20starts%20out%20as%20None.%22%5D%2C%5B%22Click%20%22%2C%22Record%22%2C%22.%20To%20stop%2C%20click%20the%20stop%20button%20in%20the%20menu%20bar.%22%5D%5D.forEach((function(o)%7Bvar%20n%3Doe(%22li%22)%3Bn.appendChild(t.createTextNode(o%5B0%5D))%2Cn.appendChild(oe(%22b%22%2Cnull%2Co%5B1%5D))%2Cn.appendChild(t.createTextNode(o%5B2%5D))%2Ce.appendChild(n)%7D))%2Cy.appendChild(e)%2Cy.appendChild(oe(%22p%22%2Cnull%2C%22The%20video%20is%20saved%20to%20your%20Desktop%20as%20a%20.mov%20file.%20Close%20this%20box%20before%20you%20start.%22))%3Bvar%20o%3Doe(%22div%22%2C%22btns%22)%2Cn%3Doe(%22button%22%2C%22ghost%22%2C%22Record%20a%20WebM%20anyway%22)%2Ci%3Doe(%22button%22%2Cnull%2C%22Got%20it%22)%3Bn.type%3Di.type%3D%22button%22%2Cn.addEventListener(%22click%22%2C(function()%7By.classList.remove(%22on%22)%2CIe()%7D))%2Ci.addEventListener(%22click%22%2C(function()%7By.classList.remove(%22on%22)%7D))%2Co.appendChild(n)%2Co.appendChild(i)%2Cy.appendChild(o)%2Cy.classList.add(%22on%22)%7D()%3Aie(%22This%20browser%20can%E2%80%99t%20record%20from%20a%20web%20page%22))%7Dfunction%20Ie()%7Bvar%20e%3Dnavigator.mediaDevices%3BJ%3D!0%2CRe()%2Ce.getDisplayMedia(%7Bvideo%3A%7BdisplaySurface%3A%22browser%22%2CframeRate%3A30%7D%2Caudio%3A!1%2CselfBrowserSurface%3A%22include%22%2CsurfaceSwitching%3A%22exclude%22%2CsystemAudio%3A%22exclude%22%7D).then((function(t)%7Bvar%20o%3Dt.getVideoTracks()%5B0%5D.getSettings%3Ft.getVideoTracks()%5B0%5D.getSettings()%3A%7B%7D%3Bif(o.width%26%26o.height%26%26(o.width%3C480%7C%7Co.height%3C300))throw%20Me(%5Bt%5D)%2C%7Bname%3A%22TooSmall%22%7D%3Breturn%20e.getUserMedia(%7Baudio%3A%7BechoCancellation%3A!0%2CnoiseSuppression%3A!0%7D%7D).then((function(e)%7Breturn%5Bt%2Ce%5D%7D)%2C(function()%7Breturn%5Bt%2Cnull%5D%7D))%7D)).then((function(e)%7BJ%3D!1%2Cee%3Ffunction(e%2Ct)%7Bvar%20o%2Cn%3De.getVideoTracks().concat(t%3Ft.getAudioTracks()%3A%5B%5D)%2Ci%3D%5B%22video%2Fmp4%3Bcodecs%3Davc1%2Cmp4a.40.2%22%2C%22video%2Fmp4%3Bcodecs%3Davc1.640028%2Cmp4a.40.2%22%2C%22video%2Fmp4%3Bcodecs%3Davc1%22%2C%22video%2Fwebm%3Bcodecs%3Dvp9%2Copus%22%2C%22video%2Fwebm%3Bcodecs%3Dvp8%2Copus%22%2C%22video%2Fwebm%22%2C%22video%2Fmp4%22%5D.filter((function(e)%7Breturn%20MediaRecorder.isTypeSupported(e)%7D))%5B0%5D%3Btry%7Bo%3Dnew%20MediaRecorder(new%20MediaStream(n)%2Ci%3F%7BmimeType%3Ai%2CvideoBitsPerSecond%3A4e6%7D%3Avoid%200)%7Dcatch(o)%7Breturn%20Me(%5Be%2Ct%5D)%2Cie(%22Couldn%E2%80%99t%20start%20recording%22)%2Cvoid%20Re()%7Dvar%20a%3D%7Bmr%3Ao%2Cchunks%3A%5B%5D%2Cstreams%3A%5Be%2Ct%5D%2Cmic%3A!!t%2Cmuted%3A!1%2Ct0%3ADate.now()%2Ctype%3Ao.mimeType%7C%7Ci%7C%7C%22video%2Fwebm%22%2Cpeak%3A0%7D%3Bif(Q%3Da%2Ct)try%7Bvar%20r%3Dwindow.AudioContext%7C%7Cwindow.webkitAudioContext%3Ba.ac%3Dnew%20r%2Ca.an%3Da.ac.createAnalyser()%2Ca.an.fftSize%3D1024%2Ca.ac.createMediaStreamSource(t).connect(a.an)%2Ca.buf%3Dnew%20Float32Array(a.an.fftSize)%2C%22suspended%22%3D%3D%3Da.ac.state%26%26a.ac.resume%26%26a.ac.resume()%2Cx.classList.add(%22live%22)%7Dcatch(e)%7Ba.an%3Dnull%7Do.ondataavailable%3Dfunction(e)%7Be.data%26%26e.data.size%26%26a.chunks.push(e.data)%7D%2Co.onstop%3Dfunction()%7BNe(a)%7D%2Ce.getVideoTracks()%5B0%5D.addEventListener(%22ended%22%2CPe)%2Co.start(1e3)%2Ca.tick%3DsetInterval(Re%2C500)%2Ca.check%3DsetTimeout((function()%7BQ%3D%3D%3Da%26%26a.an%26%26!a.muted%26%26a.peak%3C.3%26%26ie(%22We%20can%E2%80%99t%20hear%20you.%20Check%20which%20microphone%20your%20Mac%20is%20using%20in%20System%20Settings%2C%20under%20Sound.%22)%7D)%2C6e3)%2Cwindow.addEventListener(%22beforeunload%22%2CLe)%2CRe()%2Cie(t%3F%22Recording%20%E2%80%94%20press%20R%20or%20click%20Stop%20to%20finish%22%3A%22Recording%20without%20sound%20%E2%80%94%20the%20microphone%20wasn%E2%80%99t%20allowed%22)%7D(e%5B0%5D%2Ce%5B1%5D)%3AMe(e)%7D)%2C(function(e)%7BJ%3D!1%2CRe()%3Bvar%20t%3De%26%26e.name%3Bie(%22TooSmall%22%3D%3D%3Dt%3F%22That%20picked%20a%20tiny%20window%2C%20not%20the%20tutorial.%20Press%20R%20and%20choose%20the%20browser%20window%20or%20Entire%20Screen.%22%3A%22NotAllowedError%22%3D%3D%3Dt%3F%22Recording%20cancelled%22%3A%22Couldn%E2%80%99t%20start%20recording%22)%7D))%7Dfunction%20Pe()%7Bvar%20e%3DQ%3Bif(e)%7Bif(Q%3Dnull%2CclearInterval(e.tick)%2CclearTimeout(e.check)%2Cx.classList.remove(%22live%22)%2Ce.ac)try%7Be.ac.close()%7Dcatch(e)%7B%7Dwindow.removeEventListener(%22beforeunload%22%2CLe)%2C%22inactive%22!%3D%3De.mr.state%3Fe.mr.stop()%3ANe(e)%2CRe()%7D%7Dfunction%20Ne(e)%7Bif(!e.saved)if(e.saved%3D!0%2CMe(e.streams)%2Ce.chunks.length)%7Bvar%20n%3Dnew%20Date%2Ci%3Dfunction(e)%7Breturn(%220%22%2Be).slice(-2)%7D%2Ca%3D((t.title%7C%7C%22tutorial%22).toLowerCase().replace(%2F%5B%5Ea-z0-9%5D%2B%2Fg%2C%22-%22).replace(%2F%5E-%2B%7C-%2B%24%2Fg%2C%22%22).slice(0%2C50)%7C%7C%22tutorial%22)%2B%22-%22%2Bn.getFullYear()%2B%22-%22%2Bi(n.getMonth()%2B1)%2B%22-%22%2Bi(n.getDate())%2B%22-%22%2Bi(n.getHours())%2Bi(n.getMinutes())%2B(%2Fmp4%2F.test(e.type)%3F%22.mp4%22%3A%22.webm%22)%2Cr%3DURL.createObjectURL(new%20Blob(e.chunks%2C%7Btype%3Ae.type.split(%22%3B%22)%5B0%5D%7D))%2Cs%3Doe(%22a%22)%3Bs.href%3Dr%2Cs.download%3Da%2C(l.isConnected%3Fd%3Ao).appendChild(s)%2Cs.click()%2Cs.remove()%2CsetTimeout((function()%7BURL.revokeObjectURL(r)%7D)%2C12e4)%2Cie(%22Saved%20%22%2Ba%2B%22%20to%20your%20Downloads%22)%7Delse%20ie(%22Nothing%20was%20recorded%22)%7Dfunction%20De()%7Bif(ee%3D!1%2Cj.forEach((function(e)%7Bwindow.removeEventListener(e%5B0%5D%2Ce%5B1%5D%2C!0)%7D))%2CQ%26%26Pe()%2CcancelAnimationFrame(%24)%2C%5BS%2CT%2CU%2CH%5D.forEach(clearTimeout)%2CF.transition%3DV.transition%2CF.transform%3DV.transform%2CF.transformOrigin%3DV.origin%2Co.style.overflowX%3DV.overflowX%2CW)try%7BCSS.highlights.delete(%22tutorial-presenter%22)%7Dcatch(e)%7B%7DC()%2Cl.remove()%3Btry%7Bdelete%20window%5Be%5D%7Dcatch(t)%7Bwindow%5Be%5D%3Dvoid%200%7D%7D%7D()%3B">Present</a>
+        <span class="hint">Drag it up to the bar. Don't click it.</span>
+      </div>
+      <p class="hint">Dragging not working? <button class="plain" id="copy" type="button">Copy the bookmark code</button> then add a new bookmark by hand and paste the code in as its address.</p>
+    </li>
+    <li>
+      <p><strong>Open a tutorial and click the bookmark.</strong> Click it again, or press <kbd>Q</kbd>, to turn it off.</p>
+    </li>
+  </ol>
+
+  <h2>Try it here first</h2>
+  <p>This turns the presenter on for this page, so you can practise on the sample tutorial at the bottom.</p>
+  <p><button class="try" id="try" type="button">Turn it on for this page</button></p>
+
+  <h2>What you can do</h2>
+  <div class="tablewrap">
+  <table class="keys">
+    <tr><td>Click</td><td>Spotlight a step or picture and zoom in on it</td></tr>
+    <tr><td>Click it again</td><td>Widen to the block around it, such as the whole step</td></tr>
+    <tr><td><kbd>→</kbd> or <kbd>Space</kbd></td><td>Next item on the page</td></tr>
+    <tr><td><kbd>←</kbd></td><td>Previous item</td></tr>
+    <tr><td>Drag across words</td><td>Highlight them in yellow</td></tr>
+    <tr><td><kbd>U</kbd> and <kbd>C</kbd></td><td>Undo the last highlight, or clear them all</td></tr>
+    <tr><td><kbd>Z</kbd></td><td>Zoom on or off. Off gives a spotlight with no movement.</td></tr>
+    <tr><td><kbd>+</kbd> and <kbd>−</kbd></td><td>Zoom in more or less</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Back to the whole page</td></tr>
+    <tr><td><kbd>R</kbd> or the Record button</td><td>Start or stop a video recording</td></tr>
+    <tr><td><kbd>M</kbd></td><td>Mute or unmute your microphone while recording</td></tr>
+    <tr><td><kbd>?</kbd></td><td>Show this list on screen</td></tr>
+    <tr><td><kbd>Q</kbd></td><td>Quit</td></tr>
+  </table>
+  </div>
+
+  <h2>Recording a quick video</h2>
+  <p>Useful when a student asks about one step: spotlight and zoom through it while you talk, and send them the video.</p>
+  <ol>
+    <li>Press <kbd>R</kbd>, or click the faint <strong>Record</strong> button in the bottom right corner.</li>
+    <li>The browser asks what to share. Pick <strong>this tab</strong> to record just the tutorial, or <strong>Entire screen</strong> if you want to switch to QGIS during the video. Then allow the microphone.</li>
+    <li>Talk through it as you would in class. Press <kbd>M</kbd> to mute for a moment if you need to.</li>
+    <li>Press <kbd>R</kbd> again or click <strong>Stop</strong>. The video lands in your Downloads folder, named after the tutorial and the date, ready to upload to Canvas.</li>
+  </ol>
+  <p class="hint">Chrome and Safari save an MP4, which plays in QuickTime and uploads to Canvas. Firefox can only save WebM videos, which Canvas doesn't accept, so in Firefox the Record button explains how to use your Mac's own recorder instead (<kbd>⌘</kbd> <kbd>Shift</kbd> <kbd>5</kbd>, with your microphone picked under Options). To record your entire screen or another app, a Mac first asks you to allow screen recording for your browser in System Settings, under Privacy &amp; Security. Recordings stay on your computer until you upload them.</p>
+
+  <h2>Good to know</h2>
+  <ul class="notes">
+    <li><strong>Scrolling still works.</strong> Use the trackpad, mouse wheel or the up and down arrow keys, including while zoomed in.</li>
+    <li><strong>Links are paused</strong> while the presenter is on, so a stray click can't take you off the page. Hold <kbd>⌘</kbd> and click to follow one.</li>
+    <li><strong>Inside Canvas it may not reach the tutorial.</strong> Canvas usually shows an uploaded page inside a frame, which a bookmark can't get into. The presenter will offer to open the tutorial in its own tab. Opening your exported file straight in the browser always works.</li>
+    <li><strong>Nothing is saved or sent anywhere.</strong> Highlights and spotlights disappear when you quit or reload, and the page is left as it was.</li>
+  </ul>
+
+  <h2>Sample tutorial to practise on</h2>
+  <p class="hint">This is a short made-up example, not one of your tutorials.</p>
+  <article class="practice">
+    <h2>Which homes sit within 30 metres of a stream?</h2>
+    <p>You have two layers: the streams in a county and the homes in it. The goal is a list of homes that fall inside a 30 metre strip on either side of any stream.</p>
+
+    <table class="layers">
+      <tr><th>Layer</th><th>Geometry</th><th>Used for</th></tr>
+      <tr><td>streams</td><td>Lines</td><td>The features we measure distance from</td></tr>
+      <tr><td>homes</td><td>Points</td><td>The features we want to pick out</td></tr>
+    </table>
+
+    <h3>The workflow</h3>
+    <figure>
+      <svg viewBox="0 0 880 300" role="img" aria-label="Workflow: streams are reprojected, buffered by 30 metres, then used with the homes layer in Select by Location to find homes within 30 metres.">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-head" d="M0 0 L10 5 L0 10z"/></marker></defs>
+        <rect class="d-data" x="10" y="30" width="120" height="48" rx="8"/><text class="d-text" x="70" y="54">streams</text>
+        <rect class="d-tool" x="170" y="30" width="150" height="48" rx="24"/><text class="d-tooltext" x="245" y="54">Reproject Layer</text>
+        <rect class="d-data" x="360" y="30" width="130" height="48" rx="8"/><text class="d-text" x="425" y="54">streams_utm</text>
+        <rect class="d-tool" x="530" y="30" width="120" height="48" rx="24"/><text class="d-tooltext" x="590" y="54">Buffer 30 m</text>
+        <rect class="d-data" x="690" y="30" width="170" height="48" rx="8"/><text class="d-text" x="775" y="54">stream_buffer</text>
+        <rect class="d-data" x="440" y="136" width="130" height="48" rx="8"/><text class="d-text" x="505" y="160">homes</text>
+        <rect class="d-tool" x="680" y="136" width="190" height="48" rx="24"/><text class="d-tooltext" x="775" y="160">Select by Location</text>
+        <rect class="d-data" x="670" y="242" width="210" height="48" rx="8"/><text class="d-text" x="775" y="266">homes within 30 m</text>
+        <path class="d-arrow" marker-end="url(#ah)" d="M130 54H166"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M320 54H356"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M490 54H526"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M650 54H686"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M775 78V132"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M570 160H676"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M775 184V238"/>
+      </svg>
+      <figcaption>Boxes are layers. Rounded shapes are tools.</figcaption>
+    </figure>
+
+    <h3>Step 1. Put the streams in a projection that uses metres</h3>
+    <ol>
+      <li>Open <strong>Vector</strong>, then <strong>Data Management Tools</strong>, then <strong>Reproject Layer</strong>.</li>
+      <li>Set <strong>Input layer</strong> to <em>streams</em>.</li>
+      <li>Set <strong>Target CRS</strong> to a projected system measured in metres, such as the UTM zone for your area.</li>
+      <li>Run the tool and name the result <em>streams_utm</em>.</li>
+    </ol>
+    <div class="why">
+      <p><strong>Why this comes first.</strong> Buffer measures distance in the layer's own units. In a geographic coordinate system those units are degrees, so a distance of 30 would mean 30 degrees, not 30 metres.</p>
+    </div>
+
+    <h3>Step 2. Buffer the streams</h3>
+    <ol>
+      <li>Open <strong>Vector</strong>, then <strong>Geoprocessing Tools</strong>, then <strong>Buffer</strong>.</li>
+      <li>Set <strong>Input layer</strong> to <em>streams_utm</em> and <strong>Distance</strong> to 30 metres.</li>
+      <li>Tick <strong>Dissolve result</strong> so overlapping strips merge into one shape.
+        <ul>
+          <li>Without it you get one buffer per stream segment.</li>
+          <li>With it, a home near two streams is only counted once.</li>
+        </ul>
+      </li>
+      <li>Run the tool and name the result <em>stream_buffer</em>.</li>
+    </ol>
+    <figure>
+      <svg viewBox="0 0 520 260" role="img" aria-label="Map sketch: a stream with a shaded strip either side. Three homes fall inside the strip and seven fall outside.">
+        <rect x="1" y="1" width="518" height="258" rx="12" fill="none" stroke="var(--line)" stroke-width="2"/>
+        <path d="M20,200 C120,120 200,220 300,130 S440,60 500,40" fill="none" stroke="var(--water-soft)" stroke-width="56" stroke-linecap="round"/>
+        <path d="M20,200 C120,120 200,220 300,130 S440,60 500,40" fill="none" stroke="var(--water)" stroke-width="3" stroke-linecap="round"/>
+        <g fill="var(--accent-bright)" stroke="var(--ink)" stroke-width="1.5">
+          <circle cx="150" cy="185" r="7"/><circle cx="215" cy="150" r="7"/><circle cx="330" cy="120" r="7"/>
+        </g>
+        <g fill="var(--card)" stroke="var(--muted)" stroke-width="1.5">
+          <circle cx="60" cy="90" r="7"/><circle cx="130" cy="60" r="7"/><circle cx="250" cy="60" r="7"/><circle cx="180" cy="235" r="7"/>
+          <circle cx="330" cy="215" r="7"/><circle cx="430" cy="170" r="7"/><circle cx="480" cy="130" r="7"/>
+        </g>
+      </svg>
+      <figcaption>The shaded strip is the buffer. Filled dots are the homes that Step 3 will select.</figcaption>
+    </figure>
+
+    <h3>Step 3. Select the homes that fall inside the buffer</h3>
+    <ol>
+      <li>Open <strong>Vector</strong>, then <strong>Research Tools</strong>, then <strong>Select by Location</strong>.</li>
+      <li>Set <strong>Select features from</strong> to <em>homes</em>.</li>
+      <li>Under <strong>Where the features</strong>, tick <strong>intersect</strong>.</li>
+      <li>Set <strong>By comparing to the features from</strong> to <em>stream_buffer</em>, then run the tool.</li>
+    </ol>
+    <p>The selected homes are your answer. Open the attribute table and switch it to show selected features to see the list.</p>
+  </article>
+</main>
+<script>
+(function () {
+  var link = document.getElementById('bm');
+  var code = link.getAttribute('href');
+  document.getElementById('try').addEventListener('click', function () {
+    if (window.__tutorialPresenter) return;
+    new Function(decodeURIComponent(code.replace(/^javascript:/, '')))();
+  });
+  var copy = document.getElementById('copy');
+  copy.addEventListener('click', function () {
+    function done() { copy.textContent = 'Copied'; setTimeout(function () { copy.textContent = 'Copy the bookmark code'; }, 1800); }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = code; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, fallback);
+    else fallback();
+  });
+})();
+</script>
+</body>
+</html>

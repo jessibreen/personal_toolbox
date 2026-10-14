@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial Presenter</title>
+<style>
+  :root {
+    --bg: #f5f3ee; --card: #fffdf9; --ink: #1e1c19; --muted: #6a645b; --line: #e1dcd1;
+    --accent: #b84f06; --accent-bright: #ff8a1f; --on-accent: #1b1206;
+    --water: #2a78c8; --water-soft: rgba(42,120,200,.2); --key: #efebe2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --card: #1c1f25; --ink: #eceae5; --muted: #a39d93; --line: #2f333b;
+      --accent: #ffa350; --accent-bright: #ff8a1f; --on-accent: #1b1206;
+      --water: #6fb1ee; --water-soft: rgba(111,177,238,.22); --key: #2a2e36;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 56px 20px 96px; }
+  h1 { font-size: 40px; line-height: 1.1; letter-spacing: -.02em; margin: 0 0 12px; }
+  h2 { font-size: 24px; line-height: 1.25; letter-spacing: -.01em; margin: 56px 0 14px; }
+  h3 { font-size: 19px; margin: 34px 0 8px; }
+  p { margin: 0 0 14px; }
+  .lede { font-size: 20px; color: var(--muted); max-width: 40em; margin-bottom: 0; }
+  .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  ol, ul { padding-left: 1.3em; margin: 0 0 14px; }
+  li { margin: 0 0 10px; }
+  li > ul, li > ol { margin-top: 8px; }
+  kbd {
+    font: 600 .82em/1 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--key);
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 3px 6px; white-space: nowrap;
+  }
+  .setup { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+  .setup > li {
+    counter-increment: step; position: relative; padding: 18px 20px 18px 64px; margin: 0 0 12px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  }
+  .setup > li::before {
+    content: counter(step); position: absolute; left: 18px; top: 18px; width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 700; font-size: 15px; color: var(--on-accent); background: var(--accent-bright);
+  }
+  .setup p:last-child { margin-bottom: 0; }
+  .drag { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 12px 0 14px; }
+  a.bookmark {
+    display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px 11px 16px; border-radius: 999px;
+    font-weight: 700; text-decoration: none; color: var(--on-accent); background: var(--accent-bright);
+    box-shadow: 0 2px 0 rgba(0,0,0,.18), 0 8px 22px rgba(255,138,31,.3); cursor: grab; user-select: none;
+  }
+  a.bookmark:active { cursor: grabbing; }
+  a.bookmark::before { content: ""; width: 0; height: 0; border-left: 10px solid currentColor; border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
+  .hint { color: var(--muted); font-size: 15px; }
+  button.plain {
+    font: inherit; font-size: 15px; font-weight: 600; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; cursor: pointer;
+  }
+  button.plain:hover { border-color: var(--muted); }
+  button.try {
+    font: inherit; font-weight: 700; color: var(--on-accent); background: var(--accent-bright);
+    border: 0; border-radius: 10px; padding: 10px 18px; cursor: pointer;
+  }
+  .keys { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; border-spacing: 0; }
+  .keys td { padding: 11px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+  .keys tr:first-child td { border-top: 0; }
+  .keys td:first-child { width: 36%; white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+  .notes li { margin-bottom: 12px; }
+  .practice {
+    margin-top: 18px; padding: 34px 34px 30px; background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+  }
+  .practice h2 { margin-top: 0; }
+  .practice figure { margin: 22px 0; }
+  .practice figcaption { color: var(--muted); font-size: 15px; margin-top: 8px; }
+  .practice svg { display: block; width: 100%; height: auto; }
+  .why { border-left: 4px solid var(--accent-bright); padding: 10px 16px; margin: 16px 0; background: var(--bg); border-radius: 0 10px 10px 0; }
+  .layers { width: 100%; border-collapse: collapse; margin: 10px 0 4px; }
+  .layers th, .layers td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .layers th { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .d-data { fill: var(--card); stroke: var(--ink); stroke-width: 1.5; }
+  .d-tool { fill: var(--accent-bright); }
+  .d-text { fill: var(--ink); font: 600 15px system-ui, -apple-system, "Segoe UI", sans-serif; text-anchor: middle; dominant-baseline: central; }
+  .d-tooltext { fill: var(--on-accent); font: 700 15px system-ui, -apple-system, "Segoe UI", sans-serif; text-anchor: middle; dominant-baseline: central; }
+  .d-arrow { stroke: var(--muted); stroke-width: 2; fill: none; }
+  .d-head { fill: var(--muted); }
+  @media (max-width: 600px) {
+    main { padding-top: 36px; }
+    h1 { font-size: 32px; }
+    .practice { padding: 22px 18px; }
+    .setup > li { padding-left: 58px; }
+    .keys td:first-child { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">For teaching from a tutorial page</p>
+  <h1>Tutorial Presenter</h1>
+  <p class="lede">Spotlight, zoom and step through any tutorial page while you teach. It runs from a bookmark, so the tutorial file stays exactly as you exported it.</p>
+
+  <h2>Set it up once</h2>
+  <ol class="setup">
+    <li>
+      <p><strong>Show your bookmarks bar.</strong> In Chrome press <kbd>⌘</kbd> <kbd>Shift</kbd> <kbd>B</kbd>. In Safari choose View, then Show Favorites Bar.</p>
+    </li>
+    <li>
+      <p><strong>Drag this button onto the bar.</strong></p>
+      <div class="drag">
+        <a class="bookmark" id="bm" href="__HREF__">Present</a>
+        <span class="hint">Drag it up to the bar. Don't click it.</span>
+      </div>
+      <p class="hint">Dragging not working? <button class="plain" id="copy" type="button">Copy the bookmark code</button> then add a new bookmark by hand and paste the code in as its address.</p>
+    </li>
+    <li>
+      <p><strong>Open a tutorial and click the bookmark.</strong> Click it again, or press <kbd>Q</kbd>, to turn it off.</p>
+    </li>
+  </ol>
+
+  <h2>Try it here first</h2>
+  <p>This turns the presenter on for this page, so you can practise on the sample tutorial at the bottom.</p>
+  <p><button class="try" id="try" type="button">Turn it on for this page</button></p>
+
+  <h2>What you can do</h2>
+  <div class="tablewrap">
+  <table class="keys">
+    <tr><td>Click</td><td>Spotlight a step or picture and zoom in on it</td></tr>
+    <tr><td>Click it again</td><td>Widen to the block around it, such as the whole step</td></tr>
+    <tr><td><kbd>→</kbd> or <kbd>Space</kbd></td><td>Next item on the page</td></tr>
+    <tr><td><kbd>←</kbd></td><td>Previous item</td></tr>
+    <tr><td>Drag across words</td><td>Highlight them in yellow</td></tr>
+    <tr><td><kbd>U</kbd> and <kbd>C</kbd></td><td>Undo the last highlight, or clear them all</td></tr>
+    <tr><td><kbd>Z</kbd></td><td>Zoom on or off. Off gives a spotlight with no movement.</td></tr>
+    <tr><td><kbd>+</kbd> and <kbd>−</kbd></td><td>Zoom in more or less</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Back to the whole page</td></tr>
+    <tr><td><kbd>R</kbd> or the Record button</td><td>Start or stop a video recording</td></tr>
+    <tr><td><kbd>M</kbd></td><td>Mute or unmute your microphone while recording</td></tr>
+    <tr><td><kbd>?</kbd></td><td>Show this list on screen</td></tr>
+    <tr><td><kbd>Q</kbd></td><td>Quit</td></tr>
+  </table>
+  </div>
+
+  <h2>Recording a quick video</h2>
+  <p>Useful when a student asks about one step: spotlight and zoom through it while you talk, and send them the video.</p>
+  <ol>
+    <li>Press <kbd>R</kbd>, or click the faint <strong>Record</strong> button in the bottom right corner.</li>
+    <li>The browser asks what to share. Pick <strong>this tab</strong> to record just the tutorial, or <strong>Entire screen</strong> if you want to switch to QGIS during the video. Then allow the microphone.</li>
+    <li>Talk through it as you would in class. Press <kbd>M</kbd> to mute for a moment if you need to.</li>
+    <li>Press <kbd>R</kbd> again or click <strong>Stop</strong>. The video lands in your Downloads folder, named after the tutorial and the date, ready to upload to Canvas.</li>
+  </ol>
+  <p class="hint">Chrome and Safari save an MP4, which plays in QuickTime and uploads to Canvas. Firefox can only save WebM videos, which Canvas doesn't accept, so in Firefox the Record button explains how to use your Mac's own recorder instead (<kbd>⌘</kbd> <kbd>Shift</kbd> <kbd>5</kbd>, with your microphone picked under Options). To record your entire screen or another app, a Mac first asks you to allow screen recording for your browser in System Settings, under Privacy &amp; Security. Recordings stay on your computer until you upload them.</p>
+
+  <h2>Good to know</h2>
+  <ul class="notes">
+    <li><strong>Scrolling still works.</strong> Use the trackpad, mouse wheel or the up and down arrow keys, including while zoomed in.</li>
+    <li><strong>Links are paused</strong> while the presenter is on, so a stray click can't take you off the page. Hold <kbd>⌘</kbd> and click to follow one.</li>
+    <li><strong>Inside Canvas it may not reach the tutorial.</strong> Canvas usually shows an uploaded page inside a frame, which a bookmark can't get into. The presenter will offer to open the tutorial in its own tab. Opening your exported file straight in the browser always works.</li>
+    <li><strong>Nothing is saved or sent anywhere.</strong> Highlights and spotlights disappear when you quit or reload, and the page is left as it was.</li>
+  </ul>
+
+  <h2>Sample tutorial to practise on</h2>
+  <p class="hint">This is a short made-up example, not one of your tutorials.</p>
+  <article class="practice">
+    <h2>Which homes sit within 30 metres of a stream?</h2>
+    <p>You have two layers: the streams in a county and the homes in it. The goal is a list of homes that fall inside a 30 metre strip on either side of any stream.</p>
+
+    <table class="layers">
+      <tr><th>Layer</th><th>Geometry</th><th>Used for</th></tr>
+      <tr><td>streams</td><td>Lines</td><td>The features we measure distance from</td></tr>
+      <tr><td>homes</td><td>Points</td><td>The features we want to pick out</td></tr>
+    </table>
+
+    <h3>The workflow</h3>
+    <figure>
+      <svg viewBox="0 0 880 300" role="img" aria-label="Workflow: streams are reprojected, buffered by 30 metres, then used with the homes layer in Select by Location to find homes within 30 metres.">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="d-head" d="M0 0 L10 5 L0 10z"/></marker></defs>
+        <rect class="d-data" x="10" y="30" width="120" height="48" rx="8"/><text class="d-text" x="70" y="54">streams</text>
+        <rect class="d-tool" x="170" y="30" width="150" height="48" rx="24"/><text class="d-tooltext" x="245" y="54">Reproject Layer</text>
+        <rect class="d-data" x="360" y="30" width="130" height="48" rx="8"/><text class="d-text" x="425" y="54">streams_utm</text>
+        <rect class="d-tool" x="530" y="30" width="120" height="48" rx="24"/><text class="d-tooltext" x="590" y="54">Buffer 30 m</text>
+        <rect class="d-data" x="690" y="30" width="170" height="48" rx="8"/><text class="d-text" x="775" y="54">stream_buffer</text>
+        <rect class="d-data" x="440" y="136" width="130" height="48" rx="8"/><text class="d-text" x="505" y="160">homes</text>
+        <rect class="d-tool" x="680" y="136" width="190" height="48" rx="24"/><text class="d-tooltext" x="775" y="160">Select by Location</text>
+        <rect class="d-data" x="670" y="242" width="210" height="48" rx="8"/><text class="d-text" x="775" y="266">homes within 30 m</text>
+        <path class="d-arrow" marker-end="url(#ah)" d="M130 54H166"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M320 54H356"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M490 54H526"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M650 54H686"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M775 78V132"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M570 160H676"/>
+        <path class="d-arrow" marker-end="url(#ah)" d="M775 184V238"/>
+      </svg>
+      <figcaption>Boxes are layers. Rounded shapes are tools.</figcaption>
+    </figure>
+
+    <h3>Step 1. Put the streams in a projection that uses metres</h3>
+    <ol>
+      <li>Open <strong>Vector</strong>, then <strong>Data Management Tools</strong>, then <strong>Reproject Layer</strong>.</li>
+      <li>Set <strong>Input layer</strong> to <em>streams</em>.</li>
+      <li>Set <strong>Target CRS</strong> to a projected system measured in metres, such as the UTM zone for your area.</li>
+      <li>Run the tool and name the result <em>streams_utm</em>.</li>
+    </ol>
+    <div class="why">
+      <p><strong>Why this comes first.</strong> Buffer measures distance in the layer's own units. In a geographic coordinate system those units are degrees, so a distance of 30 would mean 30 degrees, not 30 metres.</p>
+    </div>
+
+    <h3>Step 2. Buffer the streams</h3>
+    <ol>
+      <li>Open <strong>Vector</strong>, then <strong>Geoprocessing Tools</strong>, then <strong>Buffer</strong>.</li>
+      <li>Set <strong>Input layer</strong> to <em>streams_utm</em> and <strong>Distance</strong> to 30 metres.</li>
+      <li>Tick <strong>Dissolve result</strong> so overlapping strips merge into one shape.
+        <ul>
+          <li>Without it you get one buffer per stream segment.</li>
+          <li>With it, a home near two streams is only counted once.</li>
+        </ul>
+      </li>
+      <li>Run the tool and name the result <em>stream_buffer</em>.</li>
+    </ol>
+    <figure>
+      <svg viewBox="0 0 520 260" role="img" aria-label="Map sketch: a stream with a shaded strip either side. Three homes fall inside the strip and seven fall outside.">
+        <rect x="1" y="1" width="518" height="258" rx="12" fill="none" stroke="var(--line)" stroke-width="2"/>
+        <path d="M20,200 C120,120 200,220 300,130 S440,60 500,40" fill="none" stroke="var(--water-soft)" stroke-width="56" stroke-linecap="round"/>
+        <path d="M20,200 C120,120 200,220 300,130 S440,60 500,40" fill="none" stroke="var(--water)" stroke-width="3" stroke-linecap="round"/>
+        <g fill="var(--accent-bright)" stroke="var(--ink)" stroke-width="1.5">
+          <circle cx="150" cy="185" r="7"/><circle cx="215" cy="150" r="7"/><circle cx="330" cy="120" r="7"/>
+        </g>
+        <g fill="var(--card)" stroke="var(--muted)" stroke-width="1.5">
+          <circle cx="60" cy="90" r="7"/><circle cx="130" cy="60" r="7"/><circle cx="250" cy="60" r="7"/><circle cx="180" cy="235" r="7"/>
+          <circle cx="330" cy="215" r="7"/><circle cx="430" cy="170" r="7"/><circle cx="480" cy="130" r="7"/>
+        </g>
+      </svg>
+      <figcaption>The shaded strip is the buffer. Filled dots are the homes that Step 3 will select.</figcaption>
+    </figure>
+
+    <h3>Step 3. Select the homes that fall inside the buffer</h3>
+    <ol>
+      <li>Open <strong>Vector</strong>, then <strong>Research Tools</strong>, then <strong>Select by Location</strong>.</li>
+      <li>Set <strong>Select features from</strong> to <em>homes</em>.</li>
+      <li>Under <strong>Where the features</strong>, tick <strong>intersect</strong>.</li>
+      <li>Set <strong>By comparing to the features from</strong> to <em>stream_buffer</em>, then run the tool.</li>
+    </ol>
+    <p>The selected homes are your answer. Open the attribute table and switch it to show selected features to see the list.</p>
+  </article>
+</main>
+<script>
+(function () {
+  var link = document.getElementById('bm');
+  var code = link.getAttribute('href');
+  document.getElementById('try').addEventListener('click', function () {
+    if (window.__tutorialPresenter) return;
+    new Function(decodeURIComponent(code.replace(/^javascript:/, '')))();
+  });
+  var copy = document.getElementById('copy');
+  copy.addEventListener('click', function () {
+    function done() { copy.textContent = 'Copied'; setTimeout(function () { copy.textContent = 'Copy the bookmark code'; }, 1800); }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = code; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, fallback);
+    else fallback();
+  });
+})();
+</script>
+</body>
+</html>
