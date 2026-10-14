@@ -1,6 +1,6 @@
 # image_scraper
 
-> Scrape images from a webpage, download them, and export filename/alt-text metadata to CSV.
+> Save a tutorial as an offline HTML package with local images, stylesheets, and fonts for Canvas.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0-green.svg)]()
@@ -20,7 +20,7 @@
 
 ## About
 
-`image_scraper.py` prompts for a webpage URL, finds image tags, downloads image files, and writes a CSV containing downloaded filenames and alt text.
+`image_scraper.py` prompts for a webpage URL, downloads its visual dependencies, saves a rewritten HTML copy with local references, and writes a CSV mapping source URLs to local paths.
 
 Output names are based on the page title, sanitized for filesystem safety.
 
@@ -28,11 +28,13 @@ Output names are based on the page title, sanitized for filesystem safety.
 
 ## Features
 
-- Parses webpage HTML and collects image `src` and `alt` data.
-- Resolves relative image URLs to absolute URLs.
-- Downloads images into a title-based folder.
-- Exports image metadata to a title-based CSV.
-- Uses the collection order found on the page.
+- Rewrites image and media references, including `srcset` and common lazy-loading attributes.
+- Downloads linked stylesheets, nested CSS imports, fonts, and CSS background assets, then rewrites their references locally.
+- Removes scripts, embeds, and external navigation so the saved page does not depend on or call back to the source site.
+- Resolves relative URLs against the page's effective base URL and downloads each unique resource once.
+- Sends requests sequentially with at least a one-second interval and backs off when the server responds with `429` or `503`.
+- Uses unique local filenames to avoid collisions between images with the same source filename.
+- Exports original URLs, local paths, alt text, resource type, and download status to a title-based CSV.
 
 ---
 
@@ -71,20 +73,21 @@ When prompted, paste the target webpage URL.
 
 ### Output
 
-- `PAGE_TITLE.csv` containing:
-	- `Filename`
-	- `Alt Text`
-- `PAGE_TITLE_images/` folder containing downloaded images
+- `PAGE_TITLE/` folder containing all outputs for the tutorial
+- `PAGE_TITLE/PAGE_TITLE.html` containing the fetched page with successful image references changed to local paths
+- `PAGE_TITLE/PAGE_TITLE.csv` mapping original resource URLs to local paths, with alt text, type, and download status
+- `PAGE_TITLE/images/` folder containing downloaded images
+- `PAGE_TITLE/styles/` and `PAGE_TITLE/assets/` folders containing stylesheets, fonts, and CSS assets
 
-Both are written to the directory where you run the script.
+Upload the entire `PAGE_TITLE/` folder to Canvas and preserve its subfolder structure. Open its HTML file so all relative resource paths resolve.
 
 ---
 
 ## Configuration
 
-This script has no command-line options.
+The script has no command-line options. Resources that fail to download are omitted from the saved page and marked as failed in the CSV rather than left pointing to the original site.
 
-To customize behavior (for example, naming or request handling), edit values directly in `image_scraper.py`.
+Scripts, embedded frames, external hyperlinks, and form actions are disabled or removed to prevent source-site connections. Pages that rely on JavaScript-generated content may therefore not be fully reproduced. Check font licenses before redistributing downloaded font files. To customize behavior, edit values directly in `image_scraper.py`.
 
 ---
 
