@@ -59,7 +59,7 @@ After an update, drag the new button to the bar and delete the old bookmark. A b
 
 ### Basic Example
 
-Open a tutorial page and click the **Present** bookmark. Click it again, or press `Q`, to turn it off.
+Open a tutorial page and click the **Present** bookmark. To turn it off, click **Done** in the bottom right corner, press `Esc` twice, or click the bookmark again.
 
 The install page has a sample QGIS tutorial to practise on, and a button to try the presenter there first.
 
@@ -80,7 +80,7 @@ The install page has a sample QGIS tutorial to practise on, and a button to try 
 | `R` | Start or stop a recording |
 | `M` | Mute or unmute the microphone while recording |
 | `?` | Show the keys on screen |
-| `Q` | Quit |
+| `Q`, `Esc` twice, or **Done** | Turn the presenter off |
 
 ### Output
 

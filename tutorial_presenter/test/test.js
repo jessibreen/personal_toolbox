@@ -186,6 +186,22 @@ const onEl = (s) => s.hole.o === '1' && s.hole.x >= s.rect.x - 60 && s.hole.y >=
   s = await state(page);
   ok(s.transform === 'none', 'clicks do nothing once it is off');
 
+  // Done button and Esc twice
+  await page.evaluate(code); await wait(100);
+  await page.evaluate(() => document.querySelector('[data-tutorial-presenter]').shadowRoot.querySelector('.done').click());
+  s = await state(page);
+  ok(!s.on && !s.host, 'the Done button turns it off');
+  await page.evaluate(code); await wait(100);
+  await page.click('#p1'); await wait(600);
+  await page.keyboard.press('Escape'); await wait(300);
+  s = await state(page);
+  ok(s.on, 'Esc with something spotlighted only goes back to the page');
+  await page.keyboard.press('Escape'); await wait(200);
+  ok((await state(page)).on, 'one more Esc asks before turning off');
+  await page.keyboard.press('Escape'); await wait(200);
+  s = await state(page);
+  ok(!s.on && !s.host && s.transform === 'none', 'Esc twice turns it off');
+
   // toggle from the bookmark
   await page.evaluate(code); await page.evaluate(code);
   s = await state(page);

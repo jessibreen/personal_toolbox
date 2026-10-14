@@ -29,6 +29,8 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+/* give the browser a chance to draw and handle input; the timeout keeps it going in a background tab, where frames stop */
+const breathe = () => new Promise((r) => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 60); });
 function fmt(t) { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + String(s).padStart(2, '0'); }
 function fmtVtt(t) {
   t = Math.max(0, t); const hh = Math.floor(t / 3600), mm = Math.floor(t % 3600 / 60), ss = Math.floor(t % 60), ms = Math.round((t % 1) * 1000);
@@ -91,7 +93,7 @@ const app = {
   project: null,          // { id, title, intro, video, sentences, steps, saved }
   file: null, videoURL: null, captions: null,
   samples: null,          // { times: number[], grays: Uint8Array[], w, h } small frames for spotting changes
-  picking: null, playingStep: null, undo: [], cancelled: false, tab: 'transcript',
+  picking: null, playingStep: null, undo: [], run: 0, tab: 'transcript',   // run: each processing job's number; Cancel moves it on
 };
 function newProject(video) {
   return { id: uid(), title: video ? video.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ') : 'Untitled tutorial', intro: '', video, sentences: [], steps: [], saved: Date.now() };
@@ -147,6 +149,7 @@ async function decodeAudio(file) {
 }
 /* fallback for files whose sound can't be decoded directly: listen while the video plays at normal speed */
 async function captureAudioRealtime(url, onProgress) {
+  const myRun = app.run, stopped = () => app.run !== myRun;
   const v = await loadVideoEl(url);
   v.muted = false;
   const ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -158,7 +161,7 @@ async function captureAudioRealtime(url, onProgress) {
   src.connect(proc); proc.connect(silent); silent.connect(ac.destination);
   await ac.resume();
   await new Promise((res) => {
-    const tick = setInterval(() => { onProgress(v.currentTime / v.duration); if (app.cancelled) { v.pause(); res(); } }, 300);
+    const tick = setInterval(() => { onProgress(v.currentTime / v.duration); if (stopped()) { v.pause(); res(); } }, 300);
     v.onended = () => { clearInterval(tick); res(); };
     v.play().catch(res);
   });
@@ -195,6 +198,7 @@ async function sampleFrames(v, onProgress) {
   try { return await sampleFramesIn(v, onProgress); } finally { v.pause(); v.remove(); }
 }
 async function sampleFramesIn(v, onProgress) {
+  const myRun = app.run, stopped = () => app.run !== myRun;
   const dur = v.duration, w = SAMPLE_W, hgt = Math.max(2, Math.round(SAMPLE_W * v.videoHeight / v.videoWidth));
   const c = h('canvas', { width: w, height: hgt }), ctx = c.getContext('2d', { willReadFrequently: true });
   const interval = Math.max(0.4, dur / 1500);
@@ -212,7 +216,7 @@ async function sampleFramesIn(v, onProgress) {
     await new Promise((res) => {
       let next = 0, last = performance.now();
       const watchdog = setInterval(() => {
-        if (app.cancelled) { v.pause(); res(); }
+        if (stopped()) { v.pause(); res(); }
         if (performance.now() - last > 6000) { v.pause(); res(); }
       }, 500);
       const cb = (now, meta) => {
@@ -228,7 +232,7 @@ async function sampleFramesIn(v, onProgress) {
     v.pause(); v.playbackRate = 1;
   }
   // anything playback missed (an older browser, or the tab was in the background) is filled in by seeking
-  for (let t = times.length ? times[times.length - 1] + interval : 0; t < dur - interval / 2 && !app.cancelled; t += interval) {
+  for (let t = times.length ? times[times.length - 1] + interval : 0; t < dur - interval / 2 && !stopped(); t += interval) {
     await seek(v, t); grab(t); onProgress(t / dur);
   }
   await seek(v, Math.max(0, dur - 0.05)); grab(dur);
@@ -321,6 +325,7 @@ function windowsFor(steps) {
   return wins;
 }
 async function transcribe(audio, steps, modelId, ui) {
+  const myRun = app.run, stopped = () => app.run !== myRun;
   const asr = await getAsr(modelId, ui.download);
   ui.downloaded();
   const english = /\.en$/i.test(modelId);
@@ -329,7 +334,7 @@ async function transcribe(audio, steps, modelId, ui) {
   let done = 0;
   const out = [];
   for (const w of wins) {
-    if (app.cancelled) throw new Error('cancelled');
+    if (stopped()) throw new Error('cancelled');
     const s0 = Math.max(0, Math.floor((w.start - 0.25) * 16000)), s1 = Math.min(audio.length, Math.ceil((w.end + 0.35) * 16000));
     const len = (s1 - s0) / 16000;
     const res = await asr(audio.slice(s0, s1), Object.assign({
@@ -348,7 +353,7 @@ async function transcribe(audio, steps, modelId, ui) {
     }
     done += w.end - w.start;
     ui.progress(done / total, w.end);
-    await sleep(0);                                   // let the page repaint; also keeps going in a background tab
+    await breathe();                                  // let the page draw and handle clicks (such as Cancel) between chunks
   }
   steps.forEach((st, i) => { st.text = tidy(out.filter((x) => x.step === i).map((x) => x.text).join(' ')); });
   return out.sort((a, b) => a.start - b.start).map(({ step, ...rest }) => rest);
@@ -494,7 +499,9 @@ function askChoice(message, choices) {               // inline question inside t
 async function openRecording(file) {
   const mode = (document.querySelector('input[name=model]:checked') || {}).value || 'accurate';
   store('tb-model', mode);
-  app.cancelled = false; app.samples = null; app.undo = []; app.picking = null;
+  app.run++;
+  const myRun = app.run, stopped = () => app.run !== myRun;
+  app.samples = null; app.undo = []; app.picking = null;
   if (app.videoURL) URL.revokeObjectURL(app.videoURL);
   app.file = file; app.videoURL = URL.createObjectURL(playableBlob(file));
   show('procView');
@@ -524,7 +531,7 @@ async function openRecording(file) {
 
     ui.start('frames');
     app.samples = await sampleFrames(v, (f) => ui.bar('frames', f));
-    if (app.cancelled) throw new Error('cancelled');
+    if (stopped()) throw new Error('cancelled');
     ui.done('frames', app.samples.times.length + ' frames checked');
 
     let sentences = [];
@@ -552,7 +559,7 @@ async function openRecording(file) {
           });
           ui.done('listen', sentences.length + ' sentences from ' + fmt(talk) + ' of speech');
         } catch (err) {
-          if (app.cancelled) throw err;
+          if (stopped()) throw err;
           console.error(err);
           const pick = await askChoice('The speech model couldn\u2019t be loaded or run (' + (err.message || err) + '). This usually means the internet connection dropped while downloading it.',
             [['Try again', 'retry', true], ['Continue without a transcript', 'skip']]);
@@ -566,20 +573,21 @@ async function openRecording(file) {
     project.sentences = sentences;
     project.steps.forEach((st) => { delete st.regions; });
     for (let i = 0; i < project.steps.length; i++) {
-      if (app.cancelled) throw new Error('cancelled');
+      if (stopped()) throw new Error('cancelled');
       const st = project.steps[i];
       st.pic = await takePicture(pictureTime(st));
       await refreshView(st.pic);
       ui.bar('draft', (i + 1) / project.steps.length, 'Picture ' + (i + 1) + ' of ' + project.steps.length);
     }
     ui.done('draft', project.steps.length + ' steps');
+    if (stopped()) return;
     app.project = project;
     app.captions = null; $('#capName').textContent = '';
     console.info('Tutorial Builder: processed in ' + Math.round((performance.now() - t0) / 1000) + ' s');
     autosave();
     openEditor();
   } catch (err) {
-    if (app.cancelled || (err && err.message === 'cancelled')) { show('startView'); return; }
+    if (stopped() || (err && err.message === 'cancelled')) return;   // Cancel has already gone back to the start
     console.error(err);
     $('#procAlert').textContent = '';
     $('#procAlert').append(h('div', { class: 'alert' }, h('p', { text: 'Something went wrong: ' + (err.message || err) }),
@@ -1171,7 +1179,12 @@ async function init() {
       app.samples = await sampleFrames(vv, () => {});
     } catch (err) { toast(err.message || 'That video couldn’t be opened'); }
   });
-  $('#cancelBtn').onclick = () => { app.cancelled = true; toast('Cancelling…'); };
+  $('#cancelBtn').onclick = () => {
+    app.run++;                                  // the running job sees this at its next check and stops; its results are thrown away
+    $('#procAlert').textContent = '';
+    show('startView'); checkResume();
+    toast('Cancelled');
+  };
   $('#titleIn').addEventListener('input', (e) => { app.project.title = e.target.value; changed(); });
   $('#introIn').addEventListener('input', (e) => { app.project.intro = e.target.value; grow(e.target); changed(); });
   $('#undoBtn').onclick = undo;

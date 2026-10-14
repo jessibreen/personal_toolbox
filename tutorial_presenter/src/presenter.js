@@ -79,7 +79,11 @@
     'border-radius:12px;background:rgba(17,20,26,.97);box-shadow:0 10px 40px rgba(0,0,0,.45);pointer-events:auto;max-width:calc(100vw - 28px)}',
     '.frame button{font:inherit;font-weight:600;color:#111;background:' + ACCENT + ';border:0;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap}',
     '.frame button.x{background:transparent;color:#fff;padding:7px 8px}',
-    '.rec{position:fixed;right:14px;bottom:14px;display:flex;align-items:center;gap:8px;height:34px;padding:0 14px 0 12px;border:0;',
+    '.dock{position:fixed;right:14px;bottom:14px;display:flex;gap:8px}',
+    '.done{display:flex;align-items:center;height:34px;padding:0 14px;border:0;border-radius:999px;background:rgba(17,20,26,.92);',
+    'box-shadow:0 6px 22px rgba(0,0,0,.3);color:#fff;font-weight:600;cursor:pointer;pointer-events:auto;opacity:.4;transition:opacity .2s}',
+    '.done:hover{opacity:1}',
+    '.rec{display:flex;align-items:center;gap:8px;height:34px;padding:0 14px 0 12px;border:0;',
     'border-radius:999px;background:rgba(17,20,26,.92);box-shadow:0 6px 22px rgba(0,0,0,.3);color:#fff;font-weight:600;cursor:pointer;',
     'pointer-events:auto;opacity:.4;transition:opacity .2s;white-space:nowrap}',
     '.rec:hover,.rec.on,.rec.wait{opacity:1}',
@@ -106,16 +110,21 @@
   var badge = mk('div', 'badge');
   var pill = mk('div', 'ui pill');
   pill.appendChild(mk('span', 'dot'));
-  pill.appendChild(mk('span', null, 'Presenting — click anything to spotlight it · ← → to step · R to record · ? for keys'));
+  pill.appendChild(mk('span', null, 'Presenting \u2014 click anything to spotlight it \u00b7 \u2190 \u2192 to step \u00b7 Esc twice to finish \u00b7 ? for keys'));
   var toastEl = mk('div', 'ui toast');
   var recBtn = mk('button', 'ui rec');
   recBtn.type = 'button';
   recBtn.title = 'Record a video of this tab (R)';
+  var doneBtn = mk('button', 'ui done', 'Done \u2715');
+  doneBtn.type = 'button';
+  doneBtn.title = 'Turn the presenter off (Q, or Esc twice)';
+  var dock = mk('div', 'dock');
   var recDot = mk('span', 'r'), recLabel = mk('span', null, 'Record');
   var lvl = mk('span', 'lvl'), lvlFill = mk('i');
   lvl.appendChild(lvlFill);
   recBtn.appendChild(recDot); recBtn.appendChild(lvl); recBtn.appendChild(recLabel);
   var recCard = mk('div', 'ui card');
+  dock.appendChild(recBtn); dock.appendChild(doneBtn);
   var help = mk('div', 'ui help');
   help.appendChild(mk('div', 'title', 'Tutorial Presenter'));
   [
@@ -131,14 +140,14 @@
     ['⌘-click or Ctrl-click', 'Use a link normally'],
     ['R', 'Start or stop a video recording'],
     ['M', 'Mute or unmute your microphone while recording'],
-    ['Q', 'Quit (or click the bookmark again)']
+    ['Q  or  Esc twice', 'Turn the presenter off (or click Done, or the bookmark)']
   ].forEach(function (r) {
     var row = mk('div', 'row');
     row.appendChild(mk('span', 'k', r[0]));
     row.appendChild(mk('span', null, r[1]));
     help.appendChild(row);
   });
-  [hole, hoverBox, badge, pill, toastEl, help, recBtn, recCard].forEach(function (n) { shadow.appendChild(n); });
+  [hole, hoverBox, badge, pill, toastEl, help, dock, recCard].forEach(function (n) { shadow.appendChild(n); });
   root.appendChild(host);
 
   var removePageSheet = addSheet(doc, '::highlight(tutorial-presenter){background-color:#ffe24a;color:#111}');
@@ -480,6 +489,7 @@
   }
   function onOther(e) { if (!passes(e)) e.stopPropagation(); }
 
+  var escAt = -1e9;
   function onKey(e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var t = e.target;
@@ -491,7 +501,10 @@
       case 'ArrowLeft': case 'PageUp': step(-1); break;
       case 'Escape':
         if (recCard.classList.contains('on')) recCard.classList.remove('on');
-        else if (help.classList.contains('on')) help.classList.remove('on'); else clear();
+        else if (help.classList.contains('on')) help.classList.remove('on');
+        else if (el) clear();
+        else if (performance.now() - escAt < 2500) quit();
+        else { escAt = performance.now(); toast(rec ? 'Press Esc again to stop recording and turn the presenter off' : 'Press Esc again to turn the presenter off'); }
         break;
       case 'z': case 'Z':
         cfg.zoom = !cfg.zoom; save();
@@ -712,6 +725,7 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 120000);
     toast('Saved ' + name + ' to your Downloads');
   }
+  doneBtn.addEventListener('click', function () { quit(); });
   recBtn.addEventListener('click', function () {
     if (rec) stopRec();
     else if (recCard.classList.contains('on')) recCard.classList.remove('on');
